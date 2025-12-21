@@ -1,0 +1,8 @@
+langchain
+langgraph
+langchain-core
+langchain-community
+langchain-ollama
+langchain-groq
+pydantic
+fastapi
