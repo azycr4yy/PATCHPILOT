@@ -6,3 +6,6 @@ langchain-ollama
 langchain-groq
 pydantic
 fastapi
+langchain-huggingface
+huggingface_hub
+transformers
