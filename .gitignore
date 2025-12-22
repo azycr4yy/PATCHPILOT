@@ -9,3 +9,5 @@ plan.md
 image.png
 models.md
 /backend/api_import.py
+/backend/zzztest.py
+/backend/__pycache__

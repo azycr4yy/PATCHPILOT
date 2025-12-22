@@ -9,3 +9,4 @@ fastapi
 langchain-huggingface
 huggingface_hub
 transformers
+scrapy
