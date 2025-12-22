@@ -1,14 +1,14 @@
 #--------------Assuming the files are already uploaded and we have what to convert from what version to what next version-----------------#
 from huggingface_hub import InferenceClient
-from api_import import HUGGING_FACE
+from api_import import HUGGING_FACE ,TAVILY
 from bs4 import BeautifulSoup
-import requests
-from urllib.parse import unquote
 from urllib.parse import urlparse, urlunparse, parse_qsl, urlencode ,urljoin
 from langchain_community.document_loaders import WebBaseLoader
-
-
-
+from tavily import TavilyClient
+import time
+from pydantic import AnyUrl
+from typing import List
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 topic = """Library: pydantic
 From version: 1.x
 To version: 2.x
@@ -55,74 +55,96 @@ def get_response():
         max_tokens=100,
         temperature=0.1
     )
-    query = response.choices[0].message.content
-    query = query.strip().splitlines()
+    queries = response.choices[0].message.content
+    queries = query.strip().splitlines()[0]
+    return queries
 ##temp link var to work on the search engine - 
-query = [['pydantic 1.x to 2.x migration guide', 'pydantic 2.x breaking changes', 'pydantic 1.x to 2.x deprecation list', 'pydantic 1.x to 2.x migration documentation', 'pydantic 2.x migration from 1.x', 'pydantic 1.x to 2.x schema changes', 'pydantic 2.x migration guide official', 'pydantic 1.x to 2.x type changes']]
-query = query[0]
+queries = [['pydantic 1.x to 2.x migration guide', 'pydantic 2.x breaking changes', 'pydantic 1.x to 2.x deprecation list', 'pydantic 1.x to 2.x migration documentation', 'pydantic 2.x migration from 1.x', 'pydantic 1.x to 2.x schema changes', 'pydantic 2.x migration guide official', 'pydantic 1.x to 2.x type changes']]
+query = queries[0]
 links = []
-def clean_ddg_link(href: str) -> str:
-    if "uddg=" in href:
-        return unquote(href.split("uddg=")[-1])
-    return href
 
-ALLOWED_QUERY_PARAMS = {
-    "page",
-    "p",
-    "q",
-    "tag",
-    "version",
-    "lang",
-    "sort",
-    "order",
-}
+def chunking_results(link:AnyUrl):
+    docs = WebBaseLoader(link).load()
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
+    chunks = text_splitter.split_documents(docs)
+    return chunks
 
-def canonicalize_url(url: str) -> str:
-    if not url:
-        return ""
-    if "&rut=" in url:
-        url = url.split("&rut=")[0]
+
+def priority_assignment(url):
+    url_parsed = urlparse(url)
+    hostname = url_parsed.hostname
+    if hostname == 'github.com':
+        return 'High'
+    elif 'docs.' in hostname:
+        return 'High'
+    elif hostname == 'stackoverflow.com':
+        return 'Medium'
+    else:
+        model_name = 'mistralai/Mistral-7B-Instruct-v0.2'
+        guide = """You are a source authority classifier.
+
+Your task is to assign an authority level to a web source
+based only on its origin and role, not on the claims it makes.
+
+Authority levels:
+- high: official documentation, specifications, or primary maintainers
+- medium: widely trusted community-maintained sources
+- low: personal blogs, opinion pieces, SEO content, forums
+
+Rules:
+- If the source is not official, it cannot be high.
+- If unsure, choose the lower authority.
+- Never infer authority from writing quality or popularity.
+- Never override known official domains.
+- Base your decision on source type and domain only.
+
+Output ONLY valid one word answer:
+"High | Medium | low"
+"""
+        client = InferenceClient(model=model_name,token=HUGGING_FACE)
+        response = client.chat.completions.create(
+            messages=[
+                {"role": "system", "content":guide },
+                {"role": "user", "content": f"{url}"}
+            ],
+            max_tokens=100,
+            temperature=0.1
+        )
+        queries = response.choices[0].message.content
+        queries = query.strip().splitlines()[0]
+        return queries
     
-    url = url.strip()
-    if not url.startswith(("http://", "https://")):
-        url = urljoin("https://duckduckgo.com", url)
-
-    parsed = urlparse(url)
-
-    scheme = parsed.scheme.lower()
-    netloc = parsed.netloc.lower()
-    path = parsed.path.rstrip("/") or "/"
-
-    query_params = parse_qsl(parsed.query, keep_blank_values=False)
-    filtered_params = [(k, v) for k, v in query_params if k in ALLOWED_QUERY_PARAMS]
-    query = urlencode(filtered_params, doseq=True)
-
-    return urlunparse((scheme, netloc, path, "", query, ""))
 
 
-def duckduckgo_search(query: str, max_result: int = 10):
-    HEADERS = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
-    }
-    url = "https://duckduckgo.com/html/"
-    params = {"q": query}
+def search():
+    client = TavilyClient(api_key=TAVILY)
+    documents = []
 
-    response = requests.get(url, headers=HEADERS, params=params)
-    response.raise_for_status()
+    for q in queries:
+        response = client.search(
+            query=q,
+            max_results=5,
+        )
+        for r in response.get("results", []):
+            flag = True
+            url = r.get("url")
+            try:
+                content = chunking_results(url)
+            except Exception as e:
+                flag = False
+                continue
+            documents.append({
+                "priority":priority_assignment(),
+                "query": q,
+                "title": r.get("title"),
+                "url": r.get("url"),
+                "content": r.get("content"),
+                "score": r.get("score"),
+                "chunk":content if flag else 'no_content',
+                "status":'works' if flag else 'broken'
+            })
+        
 
-    soup = BeautifulSoup(response.text, "html.parser")
-
-    links = []
-    for a in soup.select("a.result__a", limit=max_result):
-        href = a.get("href")
-        if not href:
-            continue
-        clean = clean_ddg_link(href)
-        links.append(canonicalize_url(clean))
-
-    return links
-links = duckduckgo_search(query[1])
-print(links)
 
 
 
