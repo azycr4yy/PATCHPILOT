@@ -1,11 +1,9 @@
 #--------------Assuming the files are already uploaded and we have what to convert from what version to what next version-----------------#
 from huggingface_hub import InferenceClient
 from api_import import HUGGING_FACE ,TAVILY
-from bs4 import BeautifulSoup
 from urllib.parse import urlparse, urlunparse, parse_qsl, urlencode ,urljoin
 from langchain_community.document_loaders import WebBaseLoader
 from tavily import TavilyClient
-import time
 from pydantic import AnyUrl
 from typing import List
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -14,7 +12,7 @@ From version: 1.x
 To version: 2.x
 Goal: migration and breaking changes
 """
-guide = """
+GUIDE = """
 You are a search query and error-pattern generator.
 
 Your task is to output COMPLETE, STANDALONE web search queries.
@@ -49,25 +47,43 @@ def get_response():
     client = InferenceClient(model=model_name,token=HUGGING_FACE)
     response = client.chat.completions.create(
         messages=[
-            {"role": "system", "content": guide},
+            {"role": "system", "content": GUIDE},
             {"role": "user", "content": f"Generate the answer according to the rules for the topic = {topic}"}
         ],
         max_tokens=100,
         temperature=0.1
     )
     queries = response.choices[0].message.content
-    queries = query.strip().splitlines()[0]
+    queries = queries.strip().splitlines()[0]
     return queries
 ##temp link var to work on the search engine - 
 queries = [['pydantic 1.x to 2.x migration guide', 'pydantic 2.x breaking changes', 'pydantic 1.x to 2.x deprecation list', 'pydantic 1.x to 2.x migration documentation', 'pydantic 2.x migration from 1.x', 'pydantic 1.x to 2.x schema changes', 'pydantic 2.x migration guide official', 'pydantic 1.x to 2.x type changes']]
 query = queries[0]
 links = []
-
+UI_PATTERNS = [
+    r"skip to content",
+    r"table of contents",
+    r"was this page helpful",
+    r"back to top",
+    r"edit this page",
+    r"previous\s+next",
+    r"on this page",
+]
 def chunking_results(link:AnyUrl):
     docs = WebBaseLoader(link).load()
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
-    chunks = text_splitter.split_documents(docs)
-    return chunks
+    normalized=[]
+    for doc in docs:
+        text = doc.page_content
+        text = text.replace("\t"," ")
+        text = "\n".join(l.strip() for l in text.splitlines())
+        text = "\n".join(l for l in text.splitlines() if l)
+        if len(text.split())<10:
+            continue
+        for pattern in UI_PATTERNS:
+            text = text.replace(pattern,"")
+        doc.page_content = text
+        normalized.append(doc)
+    return normalized
 
 
 def priority_assignment(url):
@@ -76,7 +92,7 @@ def priority_assignment(url):
     if hostname == 'github.com':
         return 'High'
     elif 'docs.' in hostname:
-        return 'High'
+        return 'Critical'
     elif hostname == 'stackoverflow.com':
         return 'Medium'
     else:
@@ -99,7 +115,7 @@ Rules:
 - Base your decision on source type and domain only.
 
 Output ONLY valid one word answer:
-"High | Medium | low"
+"Critical | High | Medium | low"
 """
         client = InferenceClient(model=model_name,token=HUGGING_FACE)
         response = client.chat.completions.create(
@@ -111,11 +127,9 @@ Output ONLY valid one word answer:
             temperature=0.1
         )
         queries = response.choices[0].message.content
-        queries = query.strip().splitlines()[0]
+        queries = queries.strip().splitlines()[0]
         return queries
     
-
-
 def search():
     client = TavilyClient(api_key=TAVILY)
     documents = []
@@ -143,28 +157,3 @@ def search():
                 "chunk":content if flag else 'no_content',
                 "status":'works' if flag else 'broken'
             })
-        
-
-
-
-
-
-
-
-def rule_synth(extracted_data:list):
-    model_name = 'Qwen/Qwen2.5-7B-Instruct'
-    client = InferenceClient(model=model_name,token=HUGGING_FACE)
-    response = client.chat.completions.create(
-        messages=[
-            {"role": "system", "content": guide},
-            {"role": "user", "content": f"Generate the answer according to the rules for the topic = {topic}"}
-        ],
-        max_tokens=100,
-        temperature=0.1
-    )
-    query = response.choices[0].message.content
-    query = query.strip().splitlines()[0]
-
-# i have to get the data in the format of
-# conetxt = {{website_url:data})
-# idk how i will do it but i have to  
