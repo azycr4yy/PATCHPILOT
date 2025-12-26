@@ -69,7 +69,7 @@ def get_guidance(doc):
           {"role": "user", "content": f"Genrate answer according to the guide "}
       ],
       max_tokens=1024,
-      temperature=0.1
+      temperature=0.4
   )
   queries = response.choices[0].message.content
   queries = queries.strip().splitlines()[0]
