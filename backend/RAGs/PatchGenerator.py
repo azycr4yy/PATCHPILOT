@@ -29,6 +29,7 @@ Risks and Caveats:
 """
 from api_import import HUGGING_FACE
 from huggingface_hub import InferenceClient
+from pathlib import Path
 model_name = "Qwen/Qwen2.5-32B-Instruct"
 CODING_GUIDE = """You are a code modification engine.
 
@@ -189,4 +190,8 @@ Risks and Caveats:
 - Risk 2: Changing the configuration style from an inner `Config` class to `model_config` might introduce subtle differences in behavior if there were any custom configurations or hooks in the original `Config` class.
 """
 ans = code_generation(migration_steps=migration_steps,code=code)
-print(ans)
+BASE_DIR = Path(__file__).parent
+file_path = BASE_DIR / "virtual_testing" / "code.py"
+with open(file_path, "w") as f:
+    f.writelines(ans)
+
