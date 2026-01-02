@@ -4,6 +4,7 @@ from typing import List
 import uuid
 import shutil
 import os
+import subprocess
 from models import InputConfig, InputType, ConfigResponse, AnalysisResponse
 
 origin = [
@@ -21,15 +22,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# In-memory storage for simple state management (mocking db)
+
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+REPOS_DIR = "repos"
+os.makedirs(REPOS_DIR, exist_ok=True)
 
 @app.get("/config/inputs", response_model=ConfigResponse)
 async def get_input_config():
-    """
-    Returns the dynamic configuration for the frontend inputs.
-    """
+
     return ConfigResponse(
         inputs=[
             InputConfig(
@@ -58,9 +59,7 @@ async def get_input_config():
 
 @app.post("/upload", response_model=AnalysisResponse)
 async def upload_file(file: UploadFile = File(...)):
-    """
-    Handles file upload for analysis.
-    """
+
     try:
         if not file.filename.endswith(('.zip', '.tar.gz')):
              raise HTTPException(status_code=400, detail="Invalid file format. Please upload a ZIP or TAR.GZ file.")
@@ -68,8 +67,7 @@ async def upload_file(file: UploadFile = File(...)):
         file_location = f"{UPLOAD_DIR}/{uuid.uuid4()}_{file.filename}"
         with open(file_location, "wb+") as buffer:
             shutil.copyfileobj(file.file, buffer)
-        
-        # In a real app, this would trigger a background task
+
         run_id = str(uuid.uuid4())
         
         return AnalysisResponse(
@@ -82,13 +80,32 @@ async def upload_file(file: UploadFile = File(...)):
 
 @app.post("/analyze/github", response_model=AnalysisResponse)
 async def analyze_github(url: str = Form(...), depth: str = Form("Quick Scan")):
-    """
-    Handles GitHub URL analysis.
-    """
-    # Logic to clone/fetch from GitHub would go here
+
     run_id = str(uuid.uuid4())
-    return AnalysisResponse(
-        run_id=run_id,
-        status="queued",
-        message=f"GitHub repository {url} queued for {depth}."
-    )
+    
+    # Extract repo name for folder creation
+    try:
+        # Simple extraction from URL
+        repo_name = url.rstrip('/').split('/')[-1]
+        if not repo_name:
+             repo_name = "unknown_repo"
+    except:
+        repo_name = "unknown_repo"
+
+    target_dir = os.path.join(REPOS_DIR, f"{run_id}_{repo_name}")
+
+    try:
+        # Clone the repository
+        # Security Note: interactively running git with user provided URLs can be risky in prod without sanitization.
+        # Assuming trusted user for this desktop app context.
+        subprocess.run(["git", "clone", url, target_dir], check=True, capture_output=True)
+        
+        return AnalysisResponse(
+            run_id=run_id,
+            status="queued",
+            message=f"GitHub repository {url} cloned to {target_dir} and queued for {depth}."
+        )
+    except subprocess.CalledProcessError as e:
+         raise HTTPException(status_code=400, detail=f"Failed to clone repository: {e.stderr.decode() if e.stderr else str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"An error occurred: {str(e)}")
