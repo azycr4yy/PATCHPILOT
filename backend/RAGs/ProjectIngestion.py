@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 import zipfile
 import json
+import re
 BASE_DIR = Path(__file__).resolve()
 while BASE_DIR.name != "backend":
     BASE_DIR = BASE_DIR.parent
@@ -75,36 +76,43 @@ def load_project_dependencies(text_docs):
         "java": set(),
         "go": set(),
     }
+    
+    PATTERNS = {
+        "requirements.txt": ("python", re.compile(r'^([a-zA-Z0-9\-_.]+)', re.IGNORECASE)),
+        "pom.xml": ("java", re.compile(r'<artifactId>([^<]+)</artifactId>', re.IGNORECASE)),
+        "go.mod": ("go", re.compile(r'^\s*(?:require\s+)?([a-zA-Z0-9\.\-_/]+)', re.IGNORECASE)),
+    }
 
     for doc in text_docs:
-        name = Path(doc).name
+        path = Path(doc)
+        name = path.name
 
-        if name == "requirements.txt":
-            for line in Path(doc).read_text().splitlines():
-                line = line.strip()
-                if line and not line.startswith("#"):
-                    deps["python"].add(
-                        line.split("==")[0].split(">=")[0].split("<")[0]
-                    )
+        if name == "package.json":
+            try:
+                data = json.loads(path.read_text(errors="ignore"))
+                deps["node"].update(data.get("dependencies", {}).keys())
+                deps["node"].update(data.get("devDependencies", {}).keys())
+            except Exception:
+                pass
+            continue
 
-        elif name == "package.json":
-            data = json.loads(Path(doc).read_text())
-            deps["node"].update(data.get("dependencies", {}).keys())
-            deps["node"].update(data.get("devDependencies", {}).keys())
-
-        elif name == "pom.xml":
-            for line in Path(doc).read_text().splitlines():
-                line = line.strip()
-                if line.startswith("<artifactId>"):
-                    deps["java"].add(
-                        line.replace("<artifactId>", "").replace("</artifactId>", "")
-                    )
-
-        elif name == "go.mod":
-            for line in Path(doc).read_text().splitlines():
-                line = line.strip()
-                if line and "/" in line and not line.startswith("module"):
-                    deps["go"].add(line.split()[0])
+        if name in PATTERNS:
+            lang, pattern = PATTERNS[name]
+            try:
+                for line in path.read_text(errors="ignore").splitlines():
+                    line = line.strip()
+                    if not line: continue
+                    if name == "requirements.txt" and line.startswith('#'): continue
+                    
+                    match = pattern.search(line)
+                    if match:
+                        val = match.group(1)
+                        if lang == "go":
+                            if "/" not in val or line.startswith("module"):
+                                continue
+                        deps[lang].add(val)
+            except Exception:
+                pass
 
     return deps
 
@@ -112,6 +120,15 @@ def load_project_dependencies(text_docs):
 def detect_dependencies(code_files, text_docs):
     project_deps = load_project_dependencies(text_docs)
     count_dependencies = {}
+    PATTERNS = {
+        "python": re.compile(r'^(?:import|from)\s+([a-zA-Z_][\w.]*)', re.IGNORECASE),
+        "node": re.compile(r'(?:from\s+[\'"]([^\'"]+)[\'"])|(?:require\s*\(\s*[\'"]([^\'"]+)[\'"])', re.IGNORECASE),
+        "java": re.compile(r'^import\s+([a-zA-Z_][\w.]*);', re.IGNORECASE),
+        "go": re.compile(r'^import\s+[\'"]([^\'"]+)[\'"]', re.IGNORECASE),
+        "c": re.compile(r'^#include\s*[<"]([^>"]+)[>"]', re.IGNORECASE),
+        "cpp": re.compile(r'^#include\s*[<"]([^>"]+)[>"]', re.IGNORECASE),
+    }
+
     for file in code_files:
         used = set()
         path = Path(file["file"])
@@ -120,57 +137,19 @@ def detect_dependencies(code_files, text_docs):
             continue
 
         lines = path.read_text(errors="ignore").splitlines()
+        lang = file["lang"]
+        
+        pattern = PATTERNS.get(lang)
+        if not pattern:
+            continue
 
         for line in lines:
             line = line.strip()
-
-            if file["lang"] == "python":
-                if line.startswith("import "):
-                    root = line.split()[1].split(".")[0]
-                    if root in project_deps["python"]:
-                        used.add(root)
-                        count_dependencies[root] = count_dependencies.get(root, 0) + 1
-
-                elif line.startswith("from "):
-                    root = line.split()[1].split(".")[0]
-                    if root in project_deps["python"]:
-                        used.add(root)
-                        count_dependencies[root] = count_dependencies.get(root, 0) + 1
-
-            elif file["lang"] == "node":
-                if "from" in line and "import" in line:
-                    root = line.split("from")[1].strip().strip(";").strip("'\"")
-                    if root in project_deps["node"]:
-                        used.add(root)
-                        count_dependencies[root] = count_dependencies.get(root, 0) + 1
-
-                elif "require(" in line:
-                    root = (
-                        line.split("require(")[1]
-                        .split(")")[0]
-                        .strip("'\"")
-                    )
-                    if root in project_deps["node"]:
-                        used.add(root)
-                        count_dependencies[root] = count_dependencies.get(root, 0) + 1
-
-            elif file["lang"] == "java":
-                if line.startswith("import "):
-                    pkg = line.replace("import", "").replace(";", "").strip()
-                    for dep in project_deps["java"]:
-                        if dep in pkg:
-                            used.add(dep)
-                            count_dependencies[dep] = count_dependencies.get(dep, 0) + 1
-
-            elif file["lang"] == "go":
-                if line.startswith("import") and '"' in line:
-                    root = line.split('"')[1]
-                    for dep in project_deps["go"]:
-                        if root.startswith(dep):
-                            used.add(dep)
-                            count_dependencies[dep] = count_dependencies.get(dep, 0) + 1
-
+            match = pattern.search(line)
+            if match:
+                dep = next((g for g in match.groups() if g is not None), None)
+                if dep:
+                    used.add(dep)
+                    count_dependencies[dep] = count_dependencies.get(dep, 0) + 1
         file["dependencies"] = list(used)
-
     return code_files,count_dependencies
-    
