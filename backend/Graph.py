@@ -61,7 +61,24 @@ def Knowledge_Graph(state: InputState):
     return state
 
 def RuleSynthesis_Graph(state: InputState):
-    pass
+    RuleSynthesizer = RuleSynthesizer()
+    for doc in state.retrieved_docs:
+        rules = RuleSynthesizer.rules_synthesis(doc)
+        import orjson
+        from pathlib import Path
+        BASE_DIR = Path(__file__).resolve()
+        while BASE_DIR.name != "backend":
+            BASE_DIR = BASE_DIR.parent
+        orjson_dir = BASE_DIR / "orjsonfiles"
+        orjson_dir = Path(orjson_dir)
+        path = orjson_dir / "initial_rules.json"
+        if path.exists():
+            data = orjson.loads(path.read_bytes())
+        else:
+            data = []
+        data.append(rules)
+        path.write_bytes(orjson.dumps(data, option=orjson.OPT_INDENT_2))
+    return state
 
 def Migration_Graph(state: InputState):
     pass

@@ -13,3 +13,4 @@ scrapy
 tavily
 uvicorn
 python-multipart
+orjson
