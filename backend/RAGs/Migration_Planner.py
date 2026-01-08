@@ -71,89 +71,22 @@ DO NOT summarize the rules.
 DO NOT suggest alternatives outside the rules.
 If a rule requires configuration changes to enable behavior, apply configuration rules before behavior rules.
 """
-model_name = "Qwen/Qwen2.5-14B-Instruct"
-def migration_prompt(rules,code,error=None):
-  client = InferenceClient(model=model_name,token=HUGGING_FACE)
-  response = client.chat.completions.create(
-      messages=[
-          {"role": "system", "content": MIGRATION_GUIDE},
-          {"role": "user", "content": f"Follow the guide with the inputs being: \n rules:{rules} \n code :{code} \n errors :{error} \n "}
-      ],
-      max_tokens=2048,
-      temperature=0.1
-  )
-  queries = response.choices[0].message.content
-  queries = queries.strip()
-  return queries
-rules = [
-    {
-        "rule_id": "pydantic-v2-parse-obj",
-        "rule_text": "In Pydantic v2, BaseModel.parse_obj() must be replaced with BaseModel.model_validate().",
-        "priority": "CRITICAL",
-        "sources": [
-            {
-                "url": "https://docs.pydantic.dev/latest/migration/",
-                "evidence_snippet": "parse_obj() has been replaced by model_validate() in Pydantic V2."
-            }
-        ]
-    },
-    {
-        "rule_id": "pydantic-v2-from-orm",
-        "rule_text": "In Pydantic v2, BaseModel.from_orm() is deprecated and must be replaced with BaseModel.model_validate() with from_attributes=True enabled in model configuration.",
-        "priority": "CRITICAL",
-        "sources": [
-            {
-                "url": "https://github.com/pydantic/pydantic/discussions/5678",
-                "evidence_snippet": "from_orm is deprecated in v2; use model_validate with from_attributes=True."
-            }
-        ]
-    },
-    {
-        "rule_id": "pydantic-v2-config-style",
-        "rule_text": "In Pydantic v2, model configuration must be defined using the model_config attribute instead of an inner Config class.",
-        "priority": "MEDIUM",
-        "sources": [
-            {
-                "url": "https://docs.pydantic.dev/latest/concepts/models/#model-config",
-                "evidence_snippet": "Configuration is now specified via the model_config attribute."
-            }
-        ]
-    },
-    {
-        "rule_id": "pydantic-v2-json",
-        "rule_text": "In Pydantic v2, BaseModel.json() must be replaced with BaseModel.model_dump_json().",
-        "priority": "HIGH",
-        "sources": [
-            {
-                "url": "https://stackoverflow.com/questions/77432012/pydantic-v2-json",
-                "evidence_snippet": "json() is deprecated in Pydantic v2; model_dump_json() should be used instead."
-            }
-        ]
-    }
-]
 
-error = "AttributeError: type object 'User' has no attribute 'parse_obj'"
-code = """
-from pydantic import BaseModel
+class MigrationPlanner:
+    def __init__(self, model_name: str = "Qwen/Qwen2.5-14B-Instruct"):
+        self.model_name = model_name
+        self.client = InferenceClient(model=self.model_name, token=HUGGING_FACE)
 
-class User(BaseModel):
-    id: int
-    name: str
+    def plan_migration(self, rules, code, error=None):
+        response = self.client.chat.completions.create(
+            messages=[
+                {"role": "system", "content": MIGRATION_GUIDE},
+                {"role": "user", "content": f"Follow the guide with the inputs being: \n rules:{rules} \n code :{code} \n errors :{error} \n "}
+            ],
+            max_tokens=2048,
+            temperature=0.1
+        )
+        queries = response.choices[0].message.content
+        queries = queries.strip()
+        return queries
 
-    class Config:
-        orm_mode = True
-
-def load_user(data):
-    return User.parse_obj(data)
-
-def load_user_from_db(db_row):
-    return User.from_orm(db_row)
-
-user = load_user({"id": 1, "name": "Alice"})
-print(user.json())
-"""
-
-
-ans = migration_prompt(rules=rules,code=code,error=error)
-print(ans)
-print(type(ans))

@@ -71,7 +71,7 @@ class RuleSynthesizer:
         Your task is to take a LIST of synthesized rules and produce a FINAL,
         NON-OVERLAPPING, CONSISTENT rule set.
 
-        INPUT RULES (JSON):
+        INPUT RULES (JSON FORMAT):
         {rules_json}
 
         INSTRUCTIONS:

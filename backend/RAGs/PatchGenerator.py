@@ -30,7 +30,7 @@ Risks and Caveats:
 from api_import import HUGGING_FACE
 from huggingface_hub import InferenceClient
 from pathlib import Path
-model_name = "Qwen/Qwen2.5-32B-Instruct"
+
 CODING_GUIDE = """You are a code modification engine.
 
 INPUTS YOU WILL RECEIVE:
@@ -105,93 +105,41 @@ FORBIDDEN BEHAVIOR
 - Do NOT add or remove imports unless required by a rule.
 - Do NOT change formatting except where a change is applied.
 """
-def code_generation(migration_steps:str,code:str):
-  client = InferenceClient(model=model_name,token=HUGGING_FACE)
-  USER_PROMPT = f"""Apply the following migration steps to the provided code.
 
-Migration Steps:
-{migration_steps}
+class PatchGenerator:
+    def __init__(self, model_name: str = "Qwen/Qwen2.5-32B-Instruct"):
+        self.model_name = model_name
+        self.client = InferenceClient(model=self.model_name, token=HUGGING_FACE)
 
-Code to modify:
-{code}
+    def generate_code(self, migration_steps: str, code: str) -> str:
+        USER_PROMPT = f"""Apply the following migration steps to the provided code.
 
-OUTPUT REQUIREMENTS:
-- Return the FULL updated code.
-- Apply migration steps respecting rule priority.
-- Higher-priority rules may overwrite lower-priority changes.
-- Every modified or added line MUST include an inline comment containing:
-  - The migration step's description of the code change
-  - The source URL(s) for that rule
-- If a lower-priority step is skipped or overridden, document it with a TODO comment.
-- Do NOT add explanations outside code comments.
-- Do NOT change formatting except where required by the change.
-"""
-  response = client.chat.completions.create(
-      messages=[
-          {"role": "system", "content": CODING_GUIDE},
-          {"role": "user", "content": USER_PROMPT}
-      ],
-      max_tokens=2048,
-      temperature=0.0
-  )
-  queries = response.choices[0].message.content
-  queries = queries.strip()
-  return queries
-code = """from pydantic import BaseModel
-from typing import Optional
+                        Migration Steps:
+                        {migration_steps}
 
-class User(BaseModel):
-    id: int
-    name: str
-    email: Optional[str]
+                        Code to modify:
+                        {code}
 
-    class Config:
-        orm_mode = True
-        anystr_strip_whitespace = True
-
-
-def load_user_from_request(data: dict) -> User:
-    user = User.parse_obj(data)
-    return user
-
-
-def load_user_from_db(db_row) -> User:
-    return User.from_orm(db_row)
-
-
-def serialize_user(user: User) -> str:
-    return user.json()
-"""
-
-migration_steps = """Migration Steps:
-- Step 1:
-  - Rule ID: pydantic-v2-parse-obj
-  - Priority: CRITICAL
-  - Description of code change: Replace `User.parse_obj(data)` with `User.model_validate(data)`.
-  - Source of Rule(urls): https://docs.pydantic.dev/latest/migration/
-- Step 2:
-  - Rule ID: pydantic-v2-from-orm
-  - Priority: CRITICAL
-  - Description of code change: Replace `User.from_orm(db_row)` with `User.model_validate(db_row, from_attributes=True)`.
-  - Source of Rule(urls): https://github.com/pydantic/pydantic/discussions/5678
-- Step 3:
-  - Rule ID: pydantic-v2-config-style
-  - Priority: MEDIUM
-  - Description of code change: Replace the inner `Config` class with `model_config` attribute.
-  - Source of Rule(urls): https://docs.pydantic.dev/latest/concepts/models/#model-config
-- Step 4:
-  - Rule ID: pydantic-v2-json
-  - Priority: HIGH
-  - Description of code change: Replace `user.json()` with `user.model_dump_json()`.
-  - Source of Rule(urls): https://stackoverflow.com/questions/77432012/pydantic-v2-json
-
-Risks and Caveats:
-- Risk 1: The replacement of `User.from_orm(db_row)` with `User.model_validate(db_row, from_attributes=True)` assumes that `db_row` is an ORM instance. If this assumption is incorrect, the migration may fail.
-- Risk 2: Changing the configuration style from an inner `Config` class to `model_config` might introduce subtle differences in behavior if there were any custom configurations or hooks in the original `Config` class.
-"""
-ans = code_generation(migration_steps=migration_steps,code=code)
-BASE_DIR = Path(__file__).parent
-file_path = BASE_DIR / "virtual_testing" / "code.py"
-with open(file_path, "w") as f:
-    f.writelines(ans)
+                        OUTPUT REQUIREMENTS:
+                        - Return the FULL updated code.
+                        - Apply migration steps respecting rule priority.
+                        - Higher-priority rules may overwrite lower-priority changes.
+                        - Every modified or added line MUST include an inline comment containing:
+                          - The migration step's description of the code change
+                          - The source URL(s) for that rule
+                        - If a lower-priority step is skipped or overridden, document it with a TODO comment.
+                        - Do NOT add explanations outside code comments.
+                        - Do NOT change formatting except where required by the change.
+                        """
+        response = self.client.chat.completions.create(
+            messages=[
+                {"role": "system", "content": CODING_GUIDE},
+                {"role": "user", "content": USER_PROMPT}
+            ],
+            max_tokens=2048,
+            temperature=0.0
+        )
+        queries = response.choices[0].message.content
+        queries = queries.strip()
+        return queries
 
