@@ -108,7 +108,7 @@ class RuleSynthesizer:
         response = self.client_supervise.chat.completions.create(
             messages=[
                 {"role": "system", "content": SUPERVISE_GUIDE},
-                {"role": "user", "content": "Genrate answer according to the guide "}
+                {"role": "user", "content": f"Genrate answer according to the guide \n {rules_json}"}
             ],
             max_tokens=2048,
             temperature=0.1
