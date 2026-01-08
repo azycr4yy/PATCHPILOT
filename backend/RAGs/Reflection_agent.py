@@ -60,8 +60,3 @@ class ReflectionAgent:
         else:
             raise FileNotFoundError(f"Template not found at {self.template_path}")
 
-if __name__ == "__main__":
-    try:
-        agent = ReflectionAgent()
-    except Exception as e:
-        print(f"Error initializing ReflectionAgent: {e}")

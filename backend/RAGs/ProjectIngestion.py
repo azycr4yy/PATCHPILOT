@@ -30,7 +30,8 @@ class ProjectIngestor:
     def __init__(self):
         self.code_files = []
         self.text_docs = []
-
+        self.dependencies_in_code_files = {}
+                    
     def process_file(self, file_path):
         filename = os.path.basename(file_path)
         for key, val in ALLOWED_EXTENSIONS.items():
@@ -124,21 +125,16 @@ class ProjectIngestor:
             "c": re.compile(r'^#include\s*[<"]([^>"]+)[>"]', re.IGNORECASE),
             "cpp": re.compile(r'^#include\s*[<"]([^>"]+)[>"]', re.IGNORECASE),
         }
-
         for file in self.code_files:
             used = set()
             path = Path(file["file"])
-
             if not path.exists():
                 continue
-
             lines = path.read_text(errors="ignore").splitlines()
             lang = file["lang"]
-            
             pattern = PATTERNS.get(lang)
             if not pattern:
                 continue
-
             for line in lines:
                 line = line.strip()
                 match = pattern.search(line)
@@ -147,5 +143,8 @@ class ProjectIngestor:
                     if dep:
                         used.add(dep)
                         count_dependencies[dep] = count_dependencies.get(dep, 0) + 1
+                        if dep not in self.dependencies_in_code_files:
+                            self.dependencies_in_code_files[dep] = []
+                        self.dependencies_in_code_files[dep].append(file)
             file["dependencies"] = list(used)
-        return self.code_files, count_dependencies
+        return self.code_files, count_dependencies , self.dependencies_in_code_files

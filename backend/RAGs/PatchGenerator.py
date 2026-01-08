@@ -30,6 +30,7 @@ Risks and Caveats:
 from api_import import HUGGING_FACE
 from huggingface_hub import InferenceClient
 from pathlib import Path
+import os
 
 CODING_GUIDE = """You are a code modification engine.
 

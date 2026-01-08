@@ -13,6 +13,7 @@ from RAGs.RuleSynthesis import RuleSynthesizer
 from RAGs.Migration_Planner import MigrationPlanner
 import re
 from RAGs.PatchGenerator import PatchGenerator
+from RAGs.Reflection_agent import ReflectionAgent
 
 
 class InputState(BaseModel):
@@ -27,7 +28,6 @@ class InputState(BaseModel):
         default="",
         description="The risks to be ingested",
     )
-    generated_code : str = Field(default="",description="The generated code")
     rules : dict = Field(default_factory=dict,description="The synthesized rules")
     dependencies : dict = Field(default_factory=dict,description="The dependencies of the project")
     code_files : list = Field(default_factory=list,description="The code files of the project")
@@ -35,6 +35,12 @@ class InputState(BaseModel):
     retrieved_docs : list = Field(default_factory=list,description="The retrieved documentation")
     topics : str = Field(default="",description="The topics to be ingested")
     initial_rules : str = Field(default="",description="The initial rules to be ingested")
+    dependencies_in_code_files : dict = Field(default_factory=dict,description="The dependencies in code files")
+    code_language : str = Field(default="",description="The code language of the project")
+    code_version : str = Field(default="",description="The code version of the project")
+    install_preset : str = Field(default="",description="The install preset of the project")
+    run_profile : str = Field(default="",description="The run profile of the project")
+    run_args : dict = Field(default_factory=dict,description="The run args of the project")
 
 
 def project_ingestion_Graph(state: InputState):
@@ -46,7 +52,7 @@ def project_ingestion_Graph(state: InputState):
             subprocess.run(["git", "clone", git_url, repo_path])
         ingestor = ProjectIngestor()
         ingestor.ingest_directory_recursive(repo_path)
-        code_files, dependencies = ingestor.detect_dependencies()
+        code_files, dependencies , dependencies_in_code_files = ingestor.detect_dependencies()
         state.code_files = code_files
         state.dependencies = dependencies
         target_discovery = TargetDiscovery(ingestor)
@@ -104,12 +110,27 @@ def Patch_Graph(state: InputState):
     steps = state.migration_rules
     code = state.code
     generated_code = generator.generate_code(steps, code)
-    state.generated_code = generated_code
     return state
 
-from RAGs.Reflection_agent import ReflectionAgent
 
 def Reflection_Graph(state: InputState):
     agent = ReflectionAgent()
-    # TODO: Implement logic to call agent.generate_dockerfile with appropriate args from state
-    return state
+    flag = True
+    agent.generate_dockerfile(
+        code_language=state.code_language,
+        code_version=state.code_version,
+        install_preset=state.install_preset,
+        run_profile=state.run_profile,
+        run_args=state.run_args,
+    )
+    subprocess.run(["docker", "build", "-t", "my-image", "."])
+    try:
+        ans = subprocess.check_output(["docker", "run", "my-image"])
+    except subprocess.CalledProcessError as e:
+        state.errors.append(e.output)
+        flag = False
+    subprocess.run(["docker", "rm", "my-image"])
+    if flag:
+        return "Migration"
+    else:
+        return "Finished State"
