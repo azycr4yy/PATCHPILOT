@@ -3,3 +3,4 @@ import os
 load_dotenv()
 HUGGING_FACE = os.getenv("HUGGING_FACE_API")
 TAVILY = os.getenv("TAVILY_API")
+SECRET_KEY = os.getenv("SECRET_KEY")

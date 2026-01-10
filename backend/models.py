@@ -23,3 +23,19 @@ class AnalysisResponse(BaseModel):
     run_id: str
     status: str
     message: str
+
+class User(BaseModel):
+    email: str or None = None
+    password: str | None = None
+    username : str
+    disabled : bool or None = None
+    
+class UserinDB(User):
+    hashed_password: str
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+
+class TokenData(BaseModel):
+    username: Optional[str] = None
