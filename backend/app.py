@@ -1,4 +1,4 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException, Form
+from fastapi import FastAPI, File, UploadFile, HTTPException, Form , Query
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List
 import uuid
@@ -162,7 +162,15 @@ def run():
     )
 
 @app.post("/upload", response_model=AnalysisResponse)
-async def upload_file(run_id: str = Form(...),file: UploadFile = File(...)):
+async def upload_file(file: UploadFile = File(...), run_id: str = Form(None)):
+    if run_id is None:
+        run_id = uuid4().hex
+        runs[run_id] = {
+            "filename": "",
+            "gitlink" : "",
+            "depth": "",
+            "status": "queued"
+        }
     try:
         if not file.filename.endswith(('.zip', '.tar.gz')):
              raise HTTPException(status_code=400, detail="Invalid file format. Please upload a ZIP or TAR.GZ file.")
@@ -182,7 +190,21 @@ async def upload_file(run_id: str = Form(...),file: UploadFile = File(...)):
 
 
 @app.post("/analyze/github", response_model=AnalysisResponse)
-async def analyze_github(run_id: str = Form(...),url: str = Form(...), depth: str = Form("Quick Scan")):
+async def analyze_github(url: str = Form(...), depth: str = Form("Quick Scan"), run_id: str = Form(None)):
+    if run_id is None:
+        run_id = uuid4().hex
+        runs[run_id] = {
+        "filename": "",
+        "gitlink" : "",
+        "depth": "",
+        "status": "queued",
+        "knowledge" : "",
+        "plan": "",
+        "changes": "",
+        "verify": "",
+        "reflect": "",
+        "trace": ""
+    }
     try:
         repo_name = url.rstrip('/').split('/')[-1]
         if not repo_name:
@@ -210,12 +232,79 @@ async def get_current_active_user(current_user: User = Depends(get_current_user)
         raise HTTPException(status_code=400,detail="Inactive user")
     return current_user
 
-@app.get("/analyze",response_model=...)
+@app.get("/analyze")
 async def analyze(run_id: str = Query(...),current_user: User = Depends(get_current_user)):
     if run_id not in runs:
         raise HTTPException(404, "Run ID not found")
     if runs[run_id]["depth"] == "Deep Research" and not current_user:
         raise HTTPException(401, "Login required for deep research")
-    
-    
+
+@app.post("/register")
+def register(Username : str = Query(...),Email:str = Query(...),Password:str = Query(...),Company_Name:str = Query(default="Student")):
+    if not Username or not Email or not Password:
+        raise HTTPException(400, "Missing required fields")
+    if Username in placeholder_db:
+        raise HTTPException(400, "Username already exists")
+    for user in placeholder_db.values():
+        if user.get("email") == Email:
+            raise HTTPException(400, "Email already exists")
+        elif user.get("username") == Username:
+            raise HTTPException(400, "Username already exists")
+ 
+    placeholder_db[Username] = {
+        "username": Username,
+        "email": Email,
+        "password": pwd_crypt.hash(Password),
+        "company_name": Company_Name,
+        "disabled": False
+    }
+    return {"message": "User registered successfully"}
+
+@app.get("/run/{run_id}/overview")
+def get_overview(run_id: str = Path(...)):
+    pass
+
+@app.get("/run/{run_id}/knowledge")
+def get_knowledge(run_id: str = Path(...)):
+    pass
+
+@app.get("/run/{run_id}/plan")
+def get_plan(run_id: str = Path(...),current_user: User = Depends(get_current_user)):
+    if run_id not in runs:
+        raise HTTPException(404, "Run ID not found")
+    if runs[run_id]["depth"] == "Deep Research" and not current_user:
+        raise HTTPException(401, "Login required for deep research")
+
+
+@app.get("/run/{run_id}/changes")
+def get_changes(run_id: str = Path(...),current_user: User = Depends(get_current_user)):
+    if run_id not in runs:
+        raise HTTPException(404, "Run ID not found")
+    if runs[run_id]["depth"] == "Deep Research" and not current_user:
+        raise HTTPException(401, "Login required for deep research")
+
+
+@app.get("/run/{run_id}/verify")
+def get_verify(run_id: str = Path(...),current_user: User = Depends(get_current_user)):
+    if run_id not in runs:
+        raise HTTPException(404, "Run ID not found")
+    if runs[run_id]["depth"] == "Deep Research" and not current_user:
+        raise HTTPException(401, "Login required for deep research")
+
+
+@app.get("/run/{run_id}/reflect")
+def get_reflect(run_id: str = Path(...),current_user: User = Depends(get_current_user)):
+    if run_id not in runs:
+        raise HTTPException(404, "Run ID not found")
+    if runs[run_id]["depth"] == "Deep Research" and not current_user:
+        raise HTTPException(401, "Login required for deep research")
+
+
+@app.get("/run/{run_id}/trace")
+def get_trace(run_id: str = Path(...),current_user: User = Depends(get_current_user)):
+    if run_id not in runs:
+        raise HTTPException(404, "Run ID not found")
+    if runs[run_id]["depth"] == "Deep Research" and not current_user:
+        raise HTTPException(401, "Login required for deep research")
+
 
