@@ -1,0 +1,9 @@
+FROM {{ BASE_IMAGE }}
+
+WORKDIR /app
+
+{{ INSTALL_STEPS }}
+
+COPY . .
+
+CMD {{ RUN_COMMAND }}

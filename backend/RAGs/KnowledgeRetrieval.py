@@ -145,8 +145,9 @@ class KnowledgeRetriever:
                 return 'Low'
 
     def search(self, search_queries=None):
-        if search_queries is None:
-            raise Exception("No search queries provided")        
+        if not search_queries:
+            print("No generated queries provided. Falling back to default queries.")
+            search_queries = self.default_queries
         client = TavilyClient(api_key=self.tavily_api_key)
         documents = []
         for q in search_queries:

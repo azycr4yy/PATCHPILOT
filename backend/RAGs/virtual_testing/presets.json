@@ -1,0 +1,42 @@
+{
+  "base_images": {
+    "python": {
+      "3.9": "python:3.9-slim",
+      "3.10": "python:3.10-slim",
+      "3.11": "python:3.11-slim"
+    },
+    "node": {
+      "14": "node:14-alpine",
+      "16": "node:16-alpine",
+      "18": "node:18-alpine"
+    }
+  },
+  "install_presets": {
+    "pip": {
+      "steps": [
+        "COPY requirements.txt .",
+        "RUN pip install --no-cache-dir -r requirements.txt"
+      ]
+    },
+    "npm": {
+      "steps": [
+        "COPY package*.json .",
+        "RUN npm install"
+      ]
+    }
+  },
+  "run_profiles": {
+    "python_script": {
+      "cmd": ["python", "{entry}"]
+    },
+    "flask": {
+      "cmd": ["flask", "run", "--host=0.0.0.0"]
+    },
+    "node_script": {
+      "cmd": ["node", "{entry}"]
+    },
+    "npm_start": {
+        "cmd": ["npm", "start"]
+    }
+  }
+}

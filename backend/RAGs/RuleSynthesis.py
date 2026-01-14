@@ -1,4 +1,4 @@
-from api_import import HUGGING_FACE
+from RAGs.api_import import HUGGING_FACE
 from huggingface_hub import InferenceClient
 
 class RuleSynthesizer:
@@ -61,8 +61,16 @@ class RuleSynthesizer:
             temperature=0.4
         )
         queries = response.choices[0].message.content
-        queries = queries.strip().splitlines()[0]
+        queries = self._clean_json(queries)
         return queries
+
+    def _clean_json(self, text):
+        text = text.strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[1]
+        if text.endswith("```"):
+            text = text.rsplit("\n", 1)[0]
+        return text.strip()
 
     def get_supervision(self, rules_json):
         SUPERVISE_GUIDE = f"""
@@ -78,7 +86,7 @@ class RuleSynthesizer:
         1. Detect semantic overlap or duplication.
         2. Merge overlapping rules using the most restrictive interpretation.
         3. Resolve conflicts using higher priority and stronger evidence.
-        4. Discard weaker or redundant rules with justification.
+        4. Discard weaker or redundant rules 
         5. Normalize priorities to avoid overuse of CRITICAL.
 
         OUTPUT FORMAT (STRICT JSON ONLY):
@@ -96,14 +104,8 @@ class RuleSynthesizer:
                         }}
                     ]
                 }}
-            ],
-            "discarded_rules": [
-                {{
-                    "rule_id": "...",
-                    "reason": "duplicate | conflicting | subsumed"
-                }}
             ]
-        }}
+            }}
         """
         response = self.client_supervise.chat.completions.create(
             messages=[
@@ -114,7 +116,7 @@ class RuleSynthesizer:
             temperature=0.1
         )
         queries = response.choices[0].message.content
-        queries = queries.strip().splitlines()[0]
+        queries = self._clean_json(queries)
         return queries
 
     def rules_synthesis(self, docs):

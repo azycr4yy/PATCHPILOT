@@ -27,7 +27,7 @@ Risks and Caveats:
 - Risk 1: The replacement of `User.from_orm(db_row)` with `User.model_validate(db_row, from_attributes=True)` assumes that `db_row` is an ORM instance. If this assumption is incorrect, the migration may fail.
 - Risk 2: Changing the configuration style from an inner `Config` class to `model_config` might introduce subtle differences in behavior if there were any custom configurations or hooks in the original `Config` class.
 """
-from api_import import HUGGING_FACE
+from RAGs.api_import import HUGGING_FACE
 from huggingface_hub import InferenceClient
 from pathlib import Path
 import os

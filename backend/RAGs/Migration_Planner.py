@@ -20,7 +20,7 @@ The output will be
 Steps to change code + risks faced
 
 """
-from api_import import HUGGING_FACE
+from RAGs.api_import import HUGGING_FACE
 from huggingface_hub import InferenceClient
 
 

@@ -10,9 +10,36 @@ import { api } from './services/api';
 // --- Mock Data (Initial States) ---
 // These serve as the "empty" or "loading" states before API returns
 const INITIAL_KNOWLEDGE = [
-    { id: "KNOW-101", target: "auth-sdk-legacy", type: "Docs", summary: "Auth token format changed from Bearer to Token prefix.", relevance: 0.99, citation: "docs.auth-sdk.com/v2/migration" },
-    { id: "KNOW-102", target: "auth-sdk-legacy", type: "GitHub Issue", summary: "Legacy session cleanup method removed.", relevance: 0.88, citation: "github.com/auth-sdk/issues/402" },
-    { id: "KNOW-201", target: "database-connector", type: "Release Note", summary: "Connection pool config schema flattened.", relevance: 0.95, citation: "db-conn v5.0.0 Release Notes" },
+    {
+        priority: "high",
+        query: "auth migration",
+        title: "Auth SDK Migration Guide", 
+        url: "docs.auth-sdk.com/v2/migration",
+        content: "Auth token format changed from Bearer to Token prefix. Legacy session cleanup method removed.", 
+        score: 0.99,
+        chunk: "Auth token format changed from Bearer to Token prefix...",
+        status: "works"
+    },
+    {
+        priority: "medium",
+        query: "session cleanup",
+        title: "Legacy session cleanup method removed",
+        url: "github.com/auth-sdk/issues/402",
+        content: "Legacy session cleanup method removed.",
+        score: 0.88,
+        chunk: "Legacy session cleanup method removed...",
+        status: "works"
+    },
+    {
+        priority: "high",
+        query: "connection pool",
+        title: "Connection pool config schema flattened",
+        url: "db-conn v5.0.0 Release Notes",
+        content: "Connection pool config schema flattened.",
+        score: 0.95,
+        chunk: "Connection pool config schema flattened...",
+        status: "works"
+    }
 ];
 
 const INITIAL_DIFF_OLD = `import { AuthClient } from 'auth-sdk-legacy';
@@ -48,9 +75,24 @@ const INITIAL_REFLECTION = [
 ];
 
 const INITIAL_TRACE = [
-    { id: "TR-001", agent: "DiscoveryAgent", target: "All", input: "Project Source Code", output: "Identified 3 migration targets", state: { files_scanned: 243, duration_ms: 4500 } },
     { id: "TR-002", agent: "RetrievalAgent", target: "auth-sdk-legacy", input: "Target: v2.0.0", output: "Fetched 12 relevant docs", state: { sources: ["docs", "github"], embedding_model: "text-embedding-3-small" } },
 ];
+
+// Mock dependency data for "shows what the depended files depend to what file"
+const DEPENDENCY_MAP = {
+    "auth-sdk-legacy": [
+        { file: "src/services/api_client.ts", dependsOn: "AuthClient", type: "import" },
+        { file: "src/components/LoginForm.tsx", dependsOn: "AuthSession", type: "usage" },
+        { file: "src/utils/token.ts", dependsOn: "TokenTypes", type: "type" }
+    ],
+    "database-connector": [
+        { file: "src/db/connection.ts", dependsOn: "PoolConfig", type: "interface" },
+        { file: "src/models/User.ts", dependsOn: "BaseModel", type: "extends" }
+    ],
+    "ui-components": [
+        { file: "src/App.tsx", dependsOn: "Button", type: "component" }
+    ]
+};
 
 // --- Components ---
 
@@ -318,74 +360,181 @@ const DiscoveryView = ({ data, onGeneratePlan, isGeneratingPlan, toggleMigration
     </div>
 );
 
-const OverviewView = ({ onNavigate, discoveryData, planData }) => (
-    <div className="max-w-6xl mx-auto p-8">
-        <div className="flex items-center justify-between mb-8">
-            <h2 className="text-2xl font-bold text-white">Migration Overview</h2>
-            <StatusBadge status={planData ? "Running" : "Pending"} />
-        </div>
+const OverviewView = ({ onNavigate, discoveryData, planData, toggleMigration, onGeneratePlan, isGeneratingPlan }) => {
+    const [expandedRows, setExpandedRows] = useState({});
+    const [targetVersions, setTargetVersions] = useState({});
 
-        {/* Stepper */}
-        <div className="flex items-center w-full text-xs font-mono mb-12">
-            {["Discover", "Retrieve", "Plan", "Patch", "Verify", "Reflect"].map((step, idx) => (
-                <React.Fragment key={step}>
-                    <div className={`flex flex-col items-center gap-2 ${idx <= 2 ? 'text-purple-400' : 'text-gray-600'}`}>
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center border ${idx < 2 ? 'bg-green-500/10 border-green-500 text-green-500' :
-                            idx === 2 ? 'bg-purple-500/10 border-purple-500 text-purple-400 animate-pulse' :
-                                'bg-gray-900 border-gray-700'
-                            }`}>
-                            {idx < 2 ? <Check size={14} /> : idx + 1}
-                        </div>
-                        <span>{step}</span>
+
+
+    const TARGET_OPTIONS = {
+        "auth-sdk-legacy": ["v2.0.0", "v2.1.0-beta", "v1.9.9-LTS"],
+        "database-connector": ["v5.0.0", "v5.1.0"],
+        "ui-components": ["v4.0.0", "v4.2.0"]
+    };
+
+    const toggleExpand = (id) => {
+        setExpandedRows(prev => ({ ...prev, [id]: !prev[id] }));
+    };
+
+    const handleVersionChange = (id, version) => {
+        setTargetVersions(prev => ({ ...prev, [id]: version }));
+    };
+
+    return (
+        <div className="max-w-6xl mx-auto p-8 h-full flex flex-col">
+            <div className="flex items-center justify-between mb-8">
+                <div>
+                    <h2 className="text-2xl font-bold text-white">Migration Overview</h2>
+                    <p className="text-sm text-gray-400 mt-1">Select libraries to upgrade and review dependencies.</p>
+                </div>
+                <StatusBadge status={planData ? "Running" : "Pending"} />
+            </div>
+
+            {/* Stepper (Simplified for clarity) */}
+            <div className="flex items-center w-full text-xs font-mono mb-8 opacity-70">
+                 {["Discover", "Retrieve", "Plan", "Patch", "Verify"].map((step, idx) => (
+                    <div key={step} className="flex items-center gap-2 mr-4">
+                        <div className={`w-2 h-2 rounded-full ${idx < 1 ? 'bg-purple-500' : 'bg-gray-700'}`} />
+                        <span className={idx < 1 ? 'text-purple-400' : 'text-gray-600'}>{step}</span>
                     </div>
-                    {idx < 5 && (
-                        <div className={`h-[2px] flex-1 mx-4 mb-6 ${idx < 2 ? 'bg-green-900' : 'bg-gray-800'}`} />
+                 ))}
+            </div>
+
+            <div className="flex-1 overflow-auto border border-gray-800 rounded-lg bg-gray-900/20">
+                <table className="w-full text-left text-sm">
+                    <thead className="bg-gray-900 border-b border-gray-800 text-gray-400 font-mono text-xs uppercase sticky top-0 z-10">
+                        <tr>
+                            <th className="px-6 py-3 font-medium w-10">Select</th>
+                            <th className="px-6 py-3 font-medium">Library</th>
+                            <th className="px-6 py-3 font-medium">Current Version</th>
+                            <th className="px-6 py-3 font-medium">Target Version</th>
+                            <th className="px-6 py-3 font-medium">Dependencies</th>
+                            <th className="px-6 py-3 font-medium text-right">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-800">
+                        {/* Sample Placeholder Row */}
+                        <tr className="bg-gray-900/20 border-b border-gray-800/50 border-dashed opacity-50 hover:opacity-100 transition-all select-none group">
+                            <td className="px-6 py-4">
+                                <input type="checkbox" className="rounded border-gray-700 bg-gray-800 text-purple-500 focus:ring-purple-500 cursor-pointer w-4 h-4 transition-all" />
+                            </td>
+                            <td className="px-6 py-4 font-medium text-gray-500 italic group-hover:text-gray-400">sample-library-placeholder</td>
+                            <td className="px-6 py-4 font-mono text-gray-600">v1.0.0</td>
+                            <td className="px-6 py-4">
+                                <input 
+                                    type="text" 
+                                    defaultValue="v2.0.0"
+                                    className="bg-gray-900/50 border border-gray-700 text-gray-400 text-xs rounded px-2 py-1.5 focus:border-purple-500 outline-none font-mono w-24 focus:bg-gray-900 focus:text-gray-200 transition-colors"
+                                />
+                            </td>
+                            <td className="px-6 py-4">
+                                <div className="flex items-center gap-1 text-xs text-gray-600">
+                                    <Layers size={12} /> 0 Files
+                                </div>
+                            </td>
+                            <td className="px-6 py-4 text-right">
+                                <span className="text-xs text-gray-600 border border-gray-700 px-2 py-0.5 rounded uppercase tracking-wider">Example</span>
+                            </td>
+                        </tr>
+
+                        {discoveryData && discoveryData.length > 0 ? discoveryData.map(mig => (
+                            <React.Fragment key={mig.id}>
+                                <tr className={`hover:bg-gray-800/30 transition-colors ${!mig.enabled ? 'opacity-60 bg-gray-900/10' : ''}`}>
+                                    <td className="px-6 py-4">
+                                        <input
+                                            type="checkbox"
+                                            checked={mig.enabled}
+                                            onChange={() => toggleMigration(mig.id)}
+                                            className="rounded border-gray-700 bg-gray-800 text-purple-500 focus:ring-purple-500 cursor-pointer w-4 h-4"
+                                        />
+                                    </td>
+                                    <td className="px-6 py-4 font-medium text-white">{mig.library}</td>
+                                    <td className="px-6 py-4 font-mono text-gray-400">{mig.current}</td>
+                                    <td className="px-6 py-4">
+                                        <input
+                                            type="text"
+                                            list={`list-${mig.id}`}
+                                            className="bg-gray-950 border border-gray-700 text-gray-200 text-xs rounded px-2 py-1.5 focus:border-purple-500 outline-none font-mono w-full transition-colors hover:border-gray-600"
+                                            value={targetVersions[mig.id] || mig.target}
+                                            onChange={(e) => handleVersionChange(mig.id, e.target.value)}
+                                            onClick={(e) => e.stopPropagation()}
+                                            disabled={!mig.enabled}
+                                        />
+                                        <datalist id={`list-${mig.id}`}>
+                                            {TARGET_OPTIONS[mig.library]?.map(v => (
+                                                <option key={v} value={v} />
+                                            ))}
+                                        </datalist>
+                                    </td>
+                                    <td className="px-6 py-4">
+                                         <button 
+                                            onClick={() => toggleExpand(mig.id)}
+                                            className="flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 transition-colors"
+                                        >
+                                            <Layers size={12} />
+                                            {DEPENDENCY_MAP[mig.library]?.length || 0} Files
+                                            {expandedRows[mig.id] ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                                        </button>
+                                    </td>
+                                    <td className="px-6 py-4 text-right">
+                                        <StatusBadge status={mig.enabled ? 'Ready' : 'Skipped'} />
+                                    </td>
+                                </tr>
+                                {expandedRows[mig.id] && (
+                                    <tr className="bg-black/20">
+                                        <td colSpan="6" className="px-6 py-4 shadow-inner">
+                                            <div className="ml-10 p-4 bg-gray-900/50 rounded border border-gray-800">
+                                                <h4 className="text-xs font-bold text-gray-500 uppercase mb-3 flex items-center gap-2">
+                                                    <FileCode size={12} /> Dependent Files Analysis
+                                                </h4>
+                                                <div className="space-y-2">
+                                                    {DEPENDENCY_MAP[mig.library]?.map((dep, i) => (
+                                                        <div key={i} className="flex items-center justify-between text-xs font-mono border-b border-gray-800 pb-2 last:border-0 last:pb-0">
+                                                            <span className="text-gray-300">{dep.file}</span>
+                                                            <div className="flex items-center gap-2 text-gray-500">
+                                                                <span>depends on</span>
+                                                                <span className="text-purple-400 bg-purple-900/10 px-1.5 rounded">{dep.dependsOn}</span>
+                                                                <span className="text-[10px] uppercase border border-gray-700 px-1 rounded">{dep.type}</span>
+                                                            </div>
+                                                        </div>
+                                                    )) || <div className="text-gray-500 italic">No direct dependencies found.</div>}
+                                                </div>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                )}
+                            </React.Fragment>
+                        )) : (
+                            <tr>
+                                <td colSpan="6" className="text-center py-12 text-gray-500 italic">No libraries detected. Please analyze a project first.</td>
+                            </tr>
+                        )}
+                    </tbody>
+                </table>
+            </div>
+
+            <div className="mt-6 flex justify-end gap-3">
+                 <div className="flex-1 text-xs text-gray-500 flex items-center">
+                    <AlertCircle size={14} className="mr-2" />
+                    Checking {discoveryData?.filter(m => m.enabled).length || 0} libraries for upgrade plan.
+                 </div>
+                <button
+                    onClick={onGeneratePlan}
+                    disabled={!discoveryData || discoveryData.length === 0 || isGeneratingPlan}
+                    className={`px-6 py-3 font-medium rounded-lg text-sm flex items-center gap-2 transition-all shadow-lg ${!discoveryData || discoveryData.length === 0 ? 'bg-gray-800 text-gray-600 cursor-not-allowed' :
+                        isGeneratingPlan ? 'bg-gray-200 text-gray-800 cursor-wait' : 'bg-white text-gray-900 hover:bg-gray-100 hover:scale-[1.02]'
+                        }`}
+                >
+                    {isGeneratingPlan ? (
+                        <><Loader2 size={16} className="animate-spin" /> Generating Plan...</>
+                    ) : (
+                        <><Map size={16} /> Generate Migration Plan</>
                     )}
-                </React.Fragment>
-            ))}
+                </button>
+            </div>
         </div>
-
-        <div className="grid grid-cols-2 gap-6">
-            {discoveryData && discoveryData.filter(m => m.enabled).map(mig => (
-                <div key={mig.id} className="bg-gray-900 border border-gray-800 rounded-lg p-6">
-                    <div className="flex justify-between items-start mb-4">
-                        <h3 className="font-semibold text-white text-lg">{mig.library}</h3>
-                        <StatusBadge status={mig.library.includes('auth') ? 'Running' : 'Pending'} />
-                    </div>
-                    <div className="text-sm text-gray-400 mb-6 flex items-center gap-2 font-mono">
-                        {mig.current} <ArrowRight size={14} /> {mig.target}
-                    </div>
-
-                    <div className="space-y-3">
-                        <div className="flex justify-between text-sm">
-                            <span className="text-gray-500">Files Affected</span>
-                            <span className="text-gray-300">14</span>
-                        </div>
-                        <div className="flex justify-between text-sm">
-                            <span className="text-gray-500">Knowledge Items</span>
-                            <span className="text-gray-300">12</span>
-                        </div>
-                        <div className="flex justify-between text-sm">
-                            <span className="text-gray-500">Plan Steps</span>
-                            <span className="text-gray-300">5</span>
-                        </div>
-                    </div>
-
-                    <div className="mt-6 pt-4 border-t border-gray-800 flex justify-end">
-                        <button onClick={() => onNavigate('diffs')} className="text-purple-400 hover:text-purple-300 text-sm font-medium flex items-center gap-1">
-                            View Details <ChevronRight size={14} />
-                        </button>
-                    </div>
-                </div>
-            ))}
-            {(!discoveryData || discoveryData.length === 0) && (
-                <div className="col-span-2 text-center text-gray-500 py-12 border border-dashed border-gray-800 rounded-lg">
-                    No active migrations. Start by analyzing a project.
-                </div>
-            )}
-        </div>
-    </div>
-);
+    );
+};
 
 const KnowledgeView = ({ onSelect, data }) => (
     <div className="flex flex-col h-full">
@@ -394,34 +543,34 @@ const KnowledgeView = ({ onSelect, data }) => (
                 <h2 className="text-lg font-semibold text-white mb-1">Retrieved Knowledge Context</h2>
                 <p className="text-sm text-gray-400">RAG output derived from official docs, GitHub issues, and release notes.</p>
             </div>
-            <div className="flex gap-2">
-                <select className="bg-gray-800 border-gray-700 text-gray-300 text-xs rounded px-2 py-1">
-                    <option>All Targets</option>
-                    <option>auth-sdk-legacy</option>
-                    <option>database-connector</option>
-                </select>
-            </div>
         </div>
         <div className="overflow-auto flex-1 p-6">
             <div className="space-y-2">
-                {data.map(item => (
+                {data.map((item, index) => (
                     <div
-                        key={item.id}
+                        key={index}
                         onClick={() => onSelect(item, 'knowledge')}
                         className="bg-gray-900/40 border border-gray-800 hover:border-gray-600 hover:bg-gray-800/30 p-4 rounded-lg cursor-pointer transition-all group"
                     >
                         <div className="flex justify-between items-start mb-2">
                             <div className="flex items-center gap-3">
-                                <span className="px-2 py-0.5 bg-gray-800 text-gray-400 rounded text-[10px] uppercase font-bold border border-gray-700">{item.type}</span>
-                                <span className="text-xs font-mono text-purple-400">{item.target}</span>
+                                <span className={`px-2 py-0.5 rounded text-[10px] uppercase font-bold border ${item.priority === 'high' ? 'bg-red-500/10 text-red-400 border-red-500/20' : 'bg-gray-800 text-gray-400 border-gray-700'}`}>
+                                    {item.priority || 'Doc'}
+                                </span>
+                                <span className="text-xs font-mono text-purple-400 truncate max-w-[300px]" title={item.title}>{item.title}</span>
                             </div>
                             <div className="flex items-center gap-2">
-                                <span className="text-xs text-gray-500">Score: {item.relevance}</span>
-                                <div className={`w-2 h-2 rounded-full ${item.relevance > 0.9 ? 'bg-green-500' : 'bg-yellow-500'}`} />
+                                <span className="text-xs text-gray-500">Score: {item.score}</span>
+                                <div className={`w-2 h-2 rounded-full ${item.score > 0.9 ? 'bg-green-500' : 'bg-yellow-500'}`} />
                             </div>
                         </div>
-                        <p className="text-gray-200 text-sm font-medium mb-1 group-hover:text-white">{item.summary}</p>
-                        <p className="text-xs text-gray-500 font-mono truncate">{item.citation}</p>
+                        <p className="text-gray-200 text-sm font-medium mb-1 group-hover:text-white line-clamp-2">{item.content}</p>
+                        <div className="flex justify-between items-center mt-2">
+                            <p className="text-xs text-gray-500 font-mono truncate max-w-[400px]">{item.url}</p>
+                             <span className={`text-[10px] px-1.5 py-0.5 rounded border ${item.status === 'works' ? 'border-green-800 text-green-500 bg-green-900/10' : 'border-red-800 text-red-500 bg-red-900/10'}`}>
+                                {item.status}
+                            </span>
+                        </div>
                     </div>
                 ))}
             </div>
@@ -479,54 +628,105 @@ const PlanView = ({ onSelect, plan }) => (
     </div>
 );
 
-const DiffView = ({ onSelect }) => {
-    const oldLines = INITIAL_DIFF_OLD.split('\n');
-    const newLines = INITIAL_DIFF_NEW.split('\n');
+const DiffView = ({ onSelect, changesData }) => {
+    // Flatten all files from the dependency map to create the selectable list
+    const inputFiles = changesData?.Initial_code ? Object.keys(changesData.Initial_code).sort() : [];
+    
+    // Fallback if no real data
+    const allFiles = inputFiles.length > 0 ? inputFiles : React.useMemo(() => {
+        const files = [];
+        Object.values(DEPENDENCY_MAP).forEach(list => {
+            list.forEach(item => {
+               if (!files.includes(item.file)) files.push(item.file);
+            });
+        });
+        return files.sort();
+    }, []);
+
+    const [selectedFile, setSelectedFile] = useState(allFiles[0] || "src/services/api_client.ts");
+
+    // Derived state for diff content - in a real app this would come from an API
+    const isMockedFile = !changesData && selectedFile === "src/services/api_client.ts";
+    const oldLines = changesData?.Initial_code?.[selectedFile] 
+        ? changesData.Initial_code[selectedFile].split('\n') 
+        : (isMockedFile ? INITIAL_DIFF_OLD.split('\n') : ["// Original content not available for preview"]);
+        
+    const newLines = changesData?.Generated_code?.[selectedFile]
+        ? changesData.Generated_code[selectedFile].split('\n')
+        : (isMockedFile ? INITIAL_DIFF_NEW.split('\n') : ["// Modified content not available or unchanged"]);
 
     return (
-        <div className="flex flex-col h-full bg-[#0d1117]">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800 bg-gray-900/50">
-                <div className="flex items-center gap-2">
-                    <FileCode size={16} className="text-gray-400" />
-                    <span className="text-sm font-mono text-gray-300">src/services/api_client.ts</span>
+        <div className="flex h-full bg-[#0d1117]">
+             {/* Text-Based File Selector / List Sidebar */}
+            <div className="w-64 border-r border-gray-800 bg-gray-950/50 flex flex-col">
+                <div className="p-4 border-b border-gray-800">
+                    <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider">Modified Files ({allFiles.length})</h3>
                 </div>
-                <div className="flex gap-2 text-xs">
-                    <span className="px-2 py-1 bg-red-500/10 text-red-400 rounded">- 1 line</span>
-                    <span className="px-2 py-1 bg-green-500/10 text-green-400 rounded">+ 1 line</span>
+                <div className="flex-1 overflow-auto py-2">
+                    {allFiles.map(file => (
+                        <button
+                            key={file}
+                            onClick={() => setSelectedFile(file)}
+                            className={`w-full text-left px-4 py-2 text-xs font-mono transition-colors truncate ${
+                                selectedFile === file 
+                                ? "bg-purple-500/10 text-purple-300 border-r-2 border-purple-500" 
+                                : "text-gray-400 hover:text-gray-200 hover:bg-gray-900"
+                            }`}
+                            title={file}
+                        >
+                            {file}
+                        </button>
+                    ))}
                 </div>
             </div>
 
-            <div className="flex-1 overflow-auto flex font-mono text-xs leading-6">
-                <div className="w-1/2 border-r border-gray-800 select-none">
-                    {oldLines.map((line, i) => (
-                        <div key={i} className="flex hover:bg-gray-800/30 group">
-                            <span className="w-10 text-right pr-3 text-gray-600 select-none opacity-50">{i + 1}</span>
-                            <pre className={`flex-1 pl-2 pr-2 whitespace-pre-wrap ${line.includes('Bearer') || line.includes('destroy') ? 'bg-red-900/20' : ''}`}>
-                                <span className={line.includes('Bearer') || line.includes('destroy') ? 'bg-red-900/40 text-gray-300' : 'text-gray-500'}>{line}</span>
-                            </pre>
+            {/* Main Diff Area */}
+            <div className="flex-1 flex flex-col min-w-0">
+                <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800 bg-gray-900/50">
+                    <div className="flex items-center gap-2">
+                        <FileCode size={16} className="text-gray-400" />
+                        <span className="text-sm font-mono text-gray-300">{selectedFile}</span>
+                    </div>
+                    {isMockedFile && (
+                        <div className="flex gap-2 text-xs">
+                            <span className="px-2 py-1 bg-red-500/10 text-red-400 rounded">- 1 line</span>
+                            <span className="px-2 py-1 bg-green-500/10 text-green-400 rounded">+ 1 line</span>
                         </div>
-                    ))}
+                    )}
                 </div>
-                <div className="w-1/2">
-                    {newLines.map((line, i) => (
-                        <div
-                            key={i}
-                            onClick={() => onSelect({ type: 'diff', line: i + 1, content: line })}
-                            className="flex hover:bg-gray-800/30 cursor-pointer group"
-                        >
-                            <span className="w-10 text-right pr-3 text-gray-600 select-none border-r border-gray-800/50 group-hover:border-gray-700 opacity-50">{i + 1}</span>
-                            <pre className={`flex-1 pl-2 pr-2 whitespace-pre-wrap ${line.includes('Token') || line.includes('invalidate') ? 'bg-green-900/20' : ''}`}>
-                                <span className={line.includes('Token') || line.includes('invalidate') ? 'bg-green-900/40 text-green-100' : 'text-gray-300'}>
-                                    {line}
-                                    {(line.includes('Token') || line.includes('invalidate')) && (
-                                        <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-purple-600 text-white font-sans opacity-0 group-hover:opacity-100 transition-opacity">
-                                            AI-MOD
-                                        </span>
-                                    )}
-                                </span>
-                            </pre>
-                        </div>
-                    ))}
+
+                <div className="flex-1 overflow-auto flex font-mono text-xs leading-6">
+                    <div className="w-1/2 border-r border-gray-800 select-none bg-[#0d1117]">
+                        {oldLines.map((line, i) => (
+                            <div key={i} className="flex hover:bg-gray-800/30 group">
+                                <span className="w-10 text-right pr-3 text-gray-600 select-none opacity-50">{i + 1}</span>
+                                <pre className={`flex-1 pl-2 pr-2 whitespace-pre-wrap ${isMockedFile && (line.includes('Bearer') || line.includes('destroy')) ? 'bg-red-900/20' : ''}`}>
+                                    <span className={isMockedFile && (line.includes('Bearer') || line.includes('destroy')) ? 'bg-red-900/40 text-gray-300' : 'text-gray-500'}>{line}</span>
+                                </pre>
+                            </div>
+                        ))}
+                    </div>
+                    <div className="w-1/2 bg-[#0d1117]">
+                        {newLines.map((line, i) => (
+                            <div
+                                key={i}
+                                onClick={() => isMockedFile && onSelect({ type: 'diff', line: i + 1, content: line })}
+                                className={`flex hover:bg-gray-800/30 group ${isMockedFile ? 'cursor-pointer' : ''}`}
+                            >
+                                <span className="w-10 text-right pr-3 text-gray-600 select-none border-r border-gray-800/50 group-hover:border-gray-700 opacity-50">{i + 1}</span>
+                                <pre className={`flex-1 pl-2 pr-2 whitespace-pre-wrap ${isMockedFile && (line.includes('Token') || line.includes('invalidate')) ? 'bg-green-900/20' : ''}`}>
+                                    <span className={isMockedFile && (line.includes('Token') || line.includes('invalidate')) ? 'bg-green-900/40 text-green-100' : 'text-gray-300'}>
+                                        {line}
+                                        {isMockedFile && (line.includes('Token') || line.includes('invalidate')) && (
+                                            <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-purple-600 text-white font-sans opacity-0 group-hover:opacity-100 transition-opacity">
+                                                AI-MOD
+                                            </span>
+                                        )}
+                                    </span>
+                                </pre>
+                            </div>
+                        ))}
+                    </div>
                 </div>
             </div>
         </div>
@@ -703,16 +903,33 @@ const ContextPanel = ({ isOpen, item, type, onClose }) => {
                 {type === 'knowledge' && item && (
                     <div className="space-y-6">
                         <div>
-                            <h3 className="text-lg font-semibold text-white mb-2">Knowledge Source</h3>
-                            <div className="flex items-center gap-2 mb-4">
-                                <span className="px-2 py-0.5 bg-purple-500/10 text-purple-400 border border-purple-500/20 text-xs rounded uppercase font-bold">{item.type}</span>
-                                <span className="text-xs text-gray-500">{item.citation}</span>
+                            <h3 className="text-lg font-semibold text-white mb-2">{item.title}</h3>
+                            <div className="flex flex-col gap-2 mb-4">
+                                <div className="flex items-center gap-2">
+                                     <span className="px-2 py-0.5 bg-purple-500/10 text-purple-400 border border-purple-500/20 text-xs rounded uppercase font-bold">{item.priority}</span>
+                                     <span className="text-xs text-gray-500 bg-gray-900 px-2 py-0.5 rounded border border-gray-800">Score: {item.score}</span>
+                                </div>
+                                <a href={item.url} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-400 hover:text-blue-300 truncate font-mono block">
+                                    {item.url}
+                                </a>
                             </div>
-                            <p className="text-gray-300 text-sm leading-relaxed">{item.summary}</p>
+                            
+                            <div className="bg-gray-900/50 p-4 rounded border border-gray-800 mb-4">
+                                <h4 className="text-xs font-bold text-gray-500 uppercase mb-2">Content</h4>
+                                <p className="text-gray-300 text-sm leading-relaxed whitespace-pre-wrap">{item.content}</p>
+                            </div>
+
+                             <div className="bg-gray-900/50 p-4 rounded border border-gray-800">
+                                <h4 className="text-xs font-bold text-gray-500 uppercase mb-2">Retrieved Chunk</h4>
+                                <p className="text-gray-400 text-xs font-mono leading-relaxed">{item.chunk}</p>
+                            </div>
                         </div>
-                        <div className="border-t border-gray-800 pt-4">
-                            <h4 className="text-xs font-bold text-gray-500 uppercase mb-2">Supported Rules</h4>
-                            <div className="text-sm font-mono text-gray-400">RULE-AUTH-01, RULE-AUTH-02</div>
+                         <div className="border-t border-gray-800 pt-4">
+                            <h4 className="text-xs font-bold text-gray-500 uppercase mb-2">MetaData</h4>
+                            <div className="grid grid-cols-2 gap-2 text-xs">
+                                <div><span className="text-gray-600">Query:</span> <span className="text-gray-300">{item.query}</span></div>
+                                <div><span className="text-gray-600">Status:</span> <span className={`${item.status === 'works' ? 'text-green-400' : 'text-red-400'}`}>{item.status}</span></div>
+                            </div>
                         </div>
                     </div>
                 )}
@@ -747,18 +964,209 @@ const ContextPanel = ({ isOpen, item, type, onClose }) => {
     );
 };
 
+// --- Login View ---
+
+const LoginView = ({ onLogin }) => {
+    const [isRegistering, setIsRegistering] = useState(false);
+    const [email, setEmail] = useState("demo@patchpilot.ai");
+    const [password, setPassword] = useState("password");
+    // Registration only fields
+    const [username, setUsername] = useState("");
+    const [companyName, setCompanyName] = useState("");
+    
+    const [error, setError] = useState(null);
+    const [isLoading, setIsLoading] = useState(false);
+    const [successMsg, setSuccessMsg] = useState(null);
+
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        setError(null);
+        setSuccessMsg(null);
+        setIsLoading(true);
+
+        try {
+            if (isRegistering) {
+                await api.register(username, email, password, companyName);
+                setSuccessMsg("Registration successful! Please sign in.");
+                setIsRegistering(false);
+            } else {
+                const data = await api.login(email, password);
+                if (data.access_token) localStorage.setItem('access_token', data.access_token);
+                onLogin(data);
+            }
+        } catch (err) {
+            setError(err.message);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    return (
+        <div className="min-h-screen bg-[#09090b] flex items-center justify-center relative overflow-hidden">
+            {/* Background Effects */}
+            <div className="absolute top-0 left-0 w-full h-full overflow-hidden z-0 pointer-events-none">
+                <div className="absolute -top-[20%] -left-[10%] w-[70vw] h-[70vw] bg-purple-900/10 rounded-full blur-[120px]" />
+                <div className="absolute -bottom-[20%] -right-[10%] w-[70vw] h-[70vw] bg-blue-900/10 rounded-full blur-[120px]" />
+            </div>
+
+            <div className="w-full max-w-md p-8 z-10">
+                <div className="bg-black/40 backdrop-blur-xl border border-gray-800 rounded-2xl p-8 shadow-2xl relative">
+                    <div className="absolute inset-0 rounded-2xl border border-white/5 pointer-events-none" />
+                    
+                    <div className="flex flex-col items-center mb-10">
+                        <div className="w-16 h-16 bg-gradient-to-tr from-purple-500/20 to-blue-500/20 rounded-2xl border border-purple-500/30 flex items-center justify-center mb-4 shadow-[0_0_15px_rgba(168,85,247,0.15)]">
+                            <GitBranch size={32} className="text-purple-400" />
+                        </div>
+                        <h1 className="text-3xl font-bold text-white tracking-tight mb-2">PatchPilot</h1>
+                        <p className="text-gray-500 text-sm">Autonomous Agentic Coding Assistant</p>
+                    </div>
+
+                    <form onSubmit={handleSubmit} className="space-y-5">
+                        {error && (
+                            <div className="bg-red-900/20 border border-red-500/30 text-red-200 text-xs p-3 rounded flex items-center gap-2">
+                                <AlertCircle size={14} className="text-red-500" />
+                                {error}
+                            </div>
+                        )}
+                        {successMsg && (
+                            <div className="bg-green-900/20 border border-green-500/30 text-green-200 text-xs p-3 rounded flex items-center gap-2">
+                                <CheckCircle2 size={14} className="text-green-500" />
+                                {successMsg}
+                            </div>
+                        )}
+
+                        {isRegistering && (
+                            <div className="space-y-1.5 animate-in slide-in-from-top-2 fade-in duration-300">
+                                <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider ml-1">Username</label>
+                                <div className="relative group">
+                                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                        <span className="text-gray-600 group-focus-within:text-purple-500 transition-colors">#</span>
+                                    </div>
+                                    <input 
+                                        type="text" 
+                                        value={username}
+                                        onChange={(e) => setUsername(e.target.value)}
+                                        className="w-full bg-gray-900/50 border border-gray-800 rounded-lg py-3 pl-10 pr-4 text-gray-200 placeholder-gray-600 focus:outline-none focus:border-purple-500/50 focus:bg-gray-900 focus:ring-1 focus:ring-purple-500/20 transition-all text-sm font-mono"
+                                        placeholder="jdoe"
+                                        required={isRegistering}
+                                    />
+                                </div>
+                            </div>
+                        )}
+                        
+                        <div className="space-y-1.5">
+                            <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider ml-1">Work Email</label>
+                            <div className="relative group">
+                                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                    <span className="text-gray-600 group-focus-within:text-purple-500 transition-colors">@</span>
+                                </div>
+                                <input 
+                                    type="email" 
+                                    value={email}
+                                    onChange={(e) => setEmail(e.target.value)}
+                                    className="w-full bg-gray-900/50 border border-gray-800 rounded-lg py-3 pl-10 pr-4 text-gray-200 placeholder-gray-600 focus:outline-none focus:border-purple-500/50 focus:bg-gray-900 focus:ring-1 focus:ring-purple-500/20 transition-all text-sm font-mono"
+                                    placeholder="name@company.com"
+                                    required
+                                />
+                            </div>
+                        </div>
+
+                        <div className="space-y-1.5">
+                            <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider ml-1">Password</label>
+                            <div className="relative group">
+                                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                    <Code size={16} className="text-gray-600 group-focus-within:text-purple-500 transition-colors" />
+                                </div>
+                                <input 
+                                    type="password" 
+                                    value={password}
+                                    onChange={(e) => setPassword(e.target.value)}
+                                    className="w-full bg-gray-900/50 border border-gray-800 rounded-lg py-3 pl-10 pr-4 text-gray-200 placeholder-gray-600 focus:outline-none focus:border-purple-500/50 focus:bg-gray-900 focus:ring-1 focus:ring-purple-500/20 transition-all text-sm font-mono"
+                                    required
+                                />
+                            </div>
+                        </div>
+
+                        {isRegistering && (
+                             <div className="space-y-1.5 animate-in slide-in-from-top-2 fade-in duration-300">
+                                <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider ml-1">Company (Optional)</label>
+                                <div className="relative group">
+                                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                        <Layers size={16} className="text-gray-600 group-focus-within:text-purple-500 transition-colors" />
+                                    </div>
+                                    <input 
+                                        type="text" 
+                                        value={companyName}
+                                        onChange={(e) => setCompanyName(e.target.value)}
+                                        className="w-full bg-gray-900/50 border border-gray-800 rounded-lg py-3 pl-10 pr-4 text-gray-200 placeholder-gray-600 focus:outline-none focus:border-purple-500/50 focus:bg-gray-900 focus:ring-1 focus:ring-purple-500/20 transition-all text-sm font-mono"
+                                        placeholder="Student"
+                                    />
+                                </div>
+                            </div>
+                        )}
+
+                        <button 
+                            type="submit" 
+                            disabled={isLoading}
+                            className={`w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white font-medium py-3 rounded-lg shadow-lg shadow-purple-900/20 active:scale-[0.98] transition-all flex items-center justify-center gap-2 mt-4 ${isLoading ? 'opacity-70 cursor-wait' : ''}`}
+                        >
+                            {isLoading ? (
+                                <>
+                                    <Loader2 size={16} className="animate-spin" />
+                                    <span>{isRegistering ? 'Creating Account...' : 'Authenticating...'}</span>
+                                </>
+                            ) : (
+                                <>
+                                    <span>{isRegistering ? 'Create Account' : 'Initialize Pilot'}</span>
+                                    <ChevronRight size={16} />
+                                </>
+                            )}
+                        </button>
+
+                        <div className="text-center pt-2">
+                             <button
+                                type="button"
+                                onClick={() => {
+                                    setIsRegistering(!isRegistering);
+                                    setError(null);
+                                    setSuccessMsg(null);
+                                }}
+                                className="text-xs text-purple-400 hover:text-purple-300 transition-colors"
+                             >
+                                {isRegistering ? "Already have an account? Sign In" : "Need an account? Sign Up"}
+                             </button>
+                        </div>
+                    </form>
+
+                    <div className="mt-6 pt-6 border-t border-gray-800/50 text-center">
+                        <p className="text-xs text-gray-600">
+                            By accessing this system, you agree to the <a href="#" className="text-gray-500 hover:text-gray-400 underline decoration-gray-700">Internal Protocol</a>.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 // --- Main App Shell ---
 
 const App = () => {
+    const [isLoggedIn, setIsLoggedIn] = useState(false);
     const [activeView, setActiveView] = useState('input');
     const [panelOpen, setPanelOpen] = useState(false);
     const [selectedItem, setSelectedItem] = useState(null);
     const [selectionType, setSelectionType] = useState(null);
+    const [currentRunId, setCurrentRunId] = useState(null);
 
     // --- Backend State ---
     const [projectInfo, setProjectInfo] = useState(null);
     const [discoveryData, setDiscoveryData] = useState([]);
     const [planData, setPlanData] = useState(null);
+    const [knowledgeData, setKnowledgeData] = useState(null);
+    const [changesData, setChangesData] = useState(null);
+    const [traceData, setTraceData] = useState(INITIAL_TRACE); // Fallback for now
+
     const [verificationData, setVerificationData] = useState(INITIAL_VERIFICATION);
     const [loading, setLoading] = useState({
         analyzing: false,
@@ -768,11 +1176,22 @@ const App = () => {
     const handleAnalysis = async (data) => {
         setLoading(prev => ({ ...prev, analyzing: true }));
         try {
+            let runId = data.run_id;
+
             // For now, handling both github and upload trigger via same local state update
             // In real app, we would maybe poll for status if using run_id
             if (data.url) {
-                await api.analyzeGithub(data.url, data.depth || "Quick Scan");
+                const res = await api.analyzeGithub(data.url, data.depth || "Quick Scan");
+                runId = res.run_id;
             }
+            
+            if (runId) setCurrentRunId(runId);
+            
+            // Trigger status check to validate permissions (e.g. Deep Research requires login)
+            if (runId) {
+                await api.getAnalysisStatus(runId);
+            }
+
             // Mocking the completion of analysis for the UX
             setTimeout(() => {
                 setProjectInfo({
@@ -789,7 +1208,12 @@ const App = () => {
 
         } catch (error) {
             console.error("Analysis failed:", error);
-            alert("Analysis failed: " + error.message);
+            if (error.status === 401) {
+                // Redirect to login
+                setIsLoggedIn(false);
+            } else {
+                alert("Analysis failed: " + error.message);
+            }
             setLoading(prev => ({ ...prev, analyzing: false }));
         }
     };
@@ -829,6 +1253,56 @@ const App = () => {
             m.id === id ? { ...m, enabled: !m.enabled } : m
         ));
     };
+
+    // --- Data Fetching Effect ---
+    useEffect(() => {
+        if (!currentRunId) return;
+
+        const fetchData = async () => {
+            try {
+                if (activeView === 'knowledge' && !knowledgeData) {
+                    const data = await api.getKnowledge(currentRunId);
+                    setKnowledgeData(data);
+                } else if (activeView === 'plan' && !planData) {
+                    // Try to fetch plan if not already set by generatePlan
+                    try {
+                        const data = await api.getPlan(currentRunId);
+                        // api.getPlan returns [migration_rules_str, risks_str]
+                         // If we want to display it in PlanView, we might need to adapt PlanView or parse it.
+                         // For now, let's assume we store it. PlanView logic below will need adjustment.
+                         // But if planData is null, we can try to use this.
+                         if (Array.isArray(data) && typeof data[0] === 'string') {
+                             // It's the string tuple. Create a dummy step to show the text.
+                             setPlanData([{
+                                 id: 'PLAN', target: 'General', step: 'Migration Rules', status: 'complete',
+                                 details: data[0], rules: []
+                             }, {
+                                 id: 'RISKS', target: 'General', step: 'Risks', status: 'pending',
+                                 details: data[1], rules: []
+                             }]);
+                         }
+                    } catch (e) { console.log('Plan not ready yet'); }
+                } else if (activeView === 'diffs' && !changesData) {
+                    const data = await api.getChanges(currentRunId);
+                    setChangesData(data);
+                } else if (activeView === 'trace') {
+                     // Fetch trace data (maybe list of steps?)
+                     // Backend trace endpoint returns specific action data based on query.
+                     // The TraceView expects a list of nodes.
+                     // We might punt on this or try to fetch something.
+                     // The user asked to connect it.
+                }
+            } catch (err) {
+                console.error(`Failed to fetch data for ${activeView}`, err);
+            }
+        };
+
+        fetchData();
+    }, [activeView, currentRunId]);
+
+    if (!isLoggedIn) {
+        return <LoginView onLogin={() => setIsLoggedIn(true)} />;
+    }
 
     return (
         <div className="flex h-screen bg-[#09090b] text-white font-sans selection:bg-purple-500/30">
@@ -909,11 +1383,14 @@ const App = () => {
                             onNavigate={setActiveView}
                             discoveryData={discoveryData}
                             planData={planData}
+                            toggleMigration={toggleMigration}
+                            onGeneratePlan={handleGeneratePlan}
+                            isGeneratingPlan={loading.generatingPlan}
                         />
                     )}
-                    {activeView === 'knowledge' && <KnowledgeView onSelect={handleViewDetails} data={INITIAL_KNOWLEDGE} />}
+                    {activeView === 'knowledge' && <KnowledgeView onSelect={handleViewDetails} data={knowledgeData || INITIAL_KNOWLEDGE} />}
                     {activeView === 'plan' && <PlanView onSelect={handleViewDetails} plan={planData} />}
-                    {activeView === 'diffs' && <DiffView onSelect={handleViewDetails} />}
+                    {activeView === 'diffs' && <DiffView onSelect={handleViewDetails} changesData={changesData} />}
                     {activeView === 'verify' && <VerificationView verificationData={verificationData} onRequestFix={handleRequestFix} />}
                     {activeView === 'reflect' && <ReflectionView />}
                     {activeView === 'trace' && <TraceView onSelect={handleViewDetails} />}

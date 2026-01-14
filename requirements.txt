@@ -14,3 +14,7 @@ tavily
 uvicorn
 python-multipart
 orjson
+python-jose
+passlib[bcrypt]
+pydantic
+uuid4
