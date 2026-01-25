@@ -1,13 +1,16 @@
 from RAGs.api_import import HUGGING_FACE
-from huggingface_hub import InferenceClient
+from utils import retry_with_backoff
+
+from model_utils import get_llm_client, MODEL_NAME
 
 class RuleSynthesizer:
     def __init__(self):
-        self.model_guide = 'Qwen/Qwen2.5-7B-Instruct'
-        self.model_supervise = "Qwen/Qwen2.5-32B-Instruct" 
-        self.client_guide = InferenceClient(model=self.model_guide, token=HUGGING_FACE)
-        self.client_supervise = InferenceClient(model=self.model_supervise, token=HUGGING_FACE)
+        self.model_guide = MODEL_NAME
+        self.model_supervise = MODEL_NAME
+        self.client_guide = get_llm_client(self.model_guide)
+        self.client_supervise = get_llm_client(self.model_supervise)
 
+    @retry_with_backoff()
     def get_guidance(self, doc):
         GUIDE_SYNTHESIS = f"""
         You are a rule synthesis engine.

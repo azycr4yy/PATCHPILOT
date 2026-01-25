@@ -21,7 +21,8 @@ Steps to change code + risks faced
 
 """
 from RAGs.api_import import HUGGING_FACE
-from huggingface_hub import InferenceClient
+
+from utils import retry_with_backoff
 
 
 MIGRATION_GUIDE = """You are a migration planning assistant.
@@ -72,11 +73,14 @@ DO NOT suggest alternatives outside the rules.
 If a rule requires configuration changes to enable behavior, apply configuration rules before behavior rules.
 """
 
-class MigrationPlanner:
-    def __init__(self, model_name: str = "Qwen/Qwen2.5-14B-Instruct"):
-        self.model_name = model_name
-        self.client = InferenceClient(model=self.model_name, token=HUGGING_FACE)
+from model_utils import get_llm_client, MODEL_NAME
 
+class MigrationPlanner:
+    def __init__(self, model_name: str = MODEL_NAME):
+        self.model_name = model_name
+        self.client = get_llm_client(model_name)
+
+    @retry_with_backoff()
     def plan_migration(self, rules, code, error=None):
         response = self.client.chat.completions.create(
             messages=[

@@ -4,6 +4,9 @@ from urllib.parse import urlparse
 from langchain_community.document_loaders import WebBaseLoader
 from tavily import TavilyClient
 from pydantic import AnyUrl
+from utils import retry_with_backoff
+
+from model_utils import get_llm_client, MODEL_NAME
 
 class KnowledgeRetriever:
     def __init__(self):
@@ -30,6 +33,7 @@ class KnowledgeRetriever:
             'pydantic 1.x to 2.x type changes'
         ]
 
+    @retry_with_backoff()
     def generate_queries(self, topic):
         guide = """
         You are a search query and error-pattern generator.
@@ -58,8 +62,8 @@ class KnowledgeRetriever:
 
         If you cannot generate valid queries, output NOTHING.
         """
-        model_name = 'Qwen/Qwen2.5-7B-Instruct'
-        client = InferenceClient(model=model_name, token=self.hf_token)
+        model_name = MODEL_NAME
+        client = get_llm_client(model_name)
         response = client.chat.completions.create(
             messages=[
                 {"role": "system", "content": guide},
@@ -97,6 +101,7 @@ class KnowledgeRetriever:
             normalized.append(doc)
         return normalized
 
+    @retry_with_backoff()
     def priority_assignment(self, url):
         url_parsed = urlparse(url)
         hostname = url_parsed.hostname
@@ -107,7 +112,7 @@ class KnowledgeRetriever:
         elif hostname == 'stackoverflow.com':
             return 'Medium'
         else:
-            model_name = 'mistralai/Mistral-7B-Instruct-v0.2'
+            model_name = MODEL_NAME
             guide = """You are a source authority classifier.
 
                     Your task is to assign an authority level to a web source
@@ -128,7 +133,7 @@ class KnowledgeRetriever:
                     Output ONLY valid one word answer:
                     "Critical | High | Medium | low"
                     """
-            client = InferenceClient(model=model_name, token=self.hf_token)
+            client = get_llm_client(model_name)
             try:
                 response = client.chat.completions.create(
                     messages=[
@@ -155,7 +160,7 @@ class KnowledgeRetriever:
             try:
                 response = client.search(
                     query=q,
-                    max_results=5,
+                    max_results=1,
                 )
             except Exception as e:
                 print(f"Error searching for {q}: {e}")
@@ -185,7 +190,7 @@ class KnowledgeRetriever:
                     "url": r.get("url"),
                     "content": r.get("content"),
                     "score": r.get("score"),
-                    "chunk": content if flag else 'no_content',
+                    "chunk": "\n\n".join([d.page_content for d in content]) if flag and content else 'no_content',
                     "status": 'works' if flag else 'broken'
                 })
         return documents

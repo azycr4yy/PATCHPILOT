@@ -57,7 +57,9 @@ export const api = {
     },
 
     getAnalysisStatus: async (runId) => {
-        const response = await fetch(`${API_BASE_URL}/analyze?run_id=${runId}`);
+        const response = await fetch(`${API_BASE_URL}/analyze?run_id=${runId}`, {
+             headers: api.getAuthHeaders()
+        });
         if (!response.ok) {
             const error = await response.json().catch(() => ({}));
             const e = new Error(error.detail || 'Analysis status check failed');
@@ -67,27 +69,74 @@ export const api = {
         return response.json();
     },
 
-    // Keep existing mock methods for parts not yet refactored on backend to ensure app doesn't crash completely
-    // In a full refactor, these would also be replaced.
-    getDiscovery: async () => {
-        await new Promise(r => setTimeout(r, 1500));
-        return [
-            { id: "MIG-001", library: "auth-sdk-legacy", current: "v1.2.4", target: "v2.0.0", confidence: 0.98, enabled: true },
-            { id: "MIG-002", library: "database-connector", current: "v4.1.0", target: "v5.0.0", confidence: 0.85, enabled: true },
-            { id: "MIG-003", library: "ui-components", current: "v3.2.1", target: "v4.0.0", confidence: 0.62, enabled: false },
-        ];
+    sendOverviewInstruction: async (runId, instruction) => {
+        const formData = new FormData();
+        formData.append('instruction', instruction);
+        
+        const response = await fetch(`${API_BASE_URL}/run/${runId}/overview`, {
+             method: 'POST',
+             headers: api.getAuthHeaders(), // Assuming we want auth
+             body: formData
+        });
+
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            throw new Error(error.detail || 'Failed to send instruction');
+        }
+        return response.json();
     },
-    generatePlan: async (selectedMigrations) => {
-        await new Promise(r => setTimeout(r, 2000));
-        return [
-            { id: 1, target: "auth-sdk-legacy", step: "Token Header Update", status: "complete", details: "Scan and replace Authorization header construction.", rules: ["RULE-AUTH-01"] },
-            { id: 2, target: "auth-sdk-legacy", step: "Session Handling", status: "in-progress", details: "Refactor session.destroy() to session.invalidate().", rules: ["RULE-AUTH-02"] },
-            { id: 3, target: "database-connector", step: "Config Schema Flattening", status: "pending", details: "Update DB connection dictionaries.", rules: ["RULE-DB-05"] },
-        ];
+
+    getReflectData: async (runId) => {
+        const response = await fetch(`${API_BASE_URL}/run/${runId}/reflect`, {
+             headers: api.getAuthHeaders()
+        });
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            throw new Error(error.detail || 'Failed to fetch reflection data');
+        }
+        return response.json();
     },
+
+    getDiscovery: async (runId) => {
+        const formData = new FormData();
+        // The endpoint accepts an optional 'instruction' form field.
+        // For initial discovery, we send empty or just rely on defaults.
+        const response = await fetch(`${API_BASE_URL}/run/${runId}/overview`, {
+             method: 'POST',
+             headers: api.getAuthHeaders(),
+             body: formData
+        });
+
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            throw new Error(error.detail || 'Failed to fetch discovery data');
+        }
+        return response.json();
+    },
+    generatePlan: async (runId, selectedMigrations) => {
+        // The backend currently generates a plan for the whole state.
+        // We pass runId. selectedMigrations might need to be sent if we want to filter, 
+        // but for now we follow the backend signature: POST /{runId}/generate_migration_plan
+        const response = await fetch(`${API_BASE_URL}/run/${runId}/generate_migration_plan`, {
+            method: 'POST',
+             headers: api.getAuthHeaders()
+        });
+
+        if (!response.ok) {
+             const error = await response.json().catch(() => ({}));
+             throw new Error(error.detail || 'Plan generation failed');
+        }
+        // The backend returns graph state/result. 
+        // We might want to return it, or fetch the formatted plan via getPlan after this.
+        return response.json();
+    },
+
     requestFix: async (verificationId) => {
-        await new Promise(r => setTimeout(r, 1000));
-        return { status: "resolved", outcome: "AI Fix Applied" };
+        // Backend does not yet have a granular "fix this specific ID" endpoint exposed in app.py
+        // We will mock a success for UI responsiveness or log it.
+        console.warn("Granular fix request not yet implemented on backend.");
+        await new Promise(r => setTimeout(r, 500));
+        return { status: "resolved", outcome: "fix_queued" };
     },
 
     /**

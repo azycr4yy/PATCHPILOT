@@ -5,7 +5,7 @@ import uuid
 import shutil
 import os
 import subprocess
-from models import InputConfig, InputType, ConfigResponse, AnalysisResponse, User , UserinDB , Token , TokenData , ReflectionRequest 
+from models import InputConfig, InputType, ConfigResponse, AnalysisResponse, User , UserinDB , Token , TokenData , ReflectionRequest, PlanRequest 
 from fastapi.security import OAuth2PasswordBearer , OAuth2PasswordRequestForm
 from fastapi import Depends
 from RAGs.api_import import SECRET_KEY
@@ -16,6 +16,8 @@ from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 from Graph import *
 import difflib
+from RAGs.ProjectIngestion import ProjectIngestor
+from RAGs.target_discovery import TargetDiscovery
 
 SECRET_KEY = SECRET_KEY
 ALGORITHM = "HS256"
@@ -103,6 +105,23 @@ async def get_current_user(token:str = Depends(oauth_scheme)):
     user = get_user(username=token_data.username)
     if user is None:
         raise credentials_exception
+    return user
+
+oauth_scheme_optional = OAuth2PasswordBearer(tokenUrl="token", auto_error=False)
+
+async def get_current_user_optional(token: str = Depends(oauth_scheme_optional)):
+    if not token:
+        return None
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str = payload.get("sub")
+        if username is None:
+            return None
+        token_data = TokenData(username=username)
+    except JWTError:
+        return None
+    
+    user = get_user(username=token_data.username)
     return user
 
 async def get_current_active_user(current_user: User = Depends(get_current_user)):
@@ -203,13 +222,20 @@ async def upload_file(file: UploadFile = File(...), run_id: str = Form(None)):
 
 
 @app.post("/analyze/github", response_model=AnalysisResponse)
-async def analyze_github(url: str = Form(...), depth: str = Form("Quick Scan"), run_id: str = Form(None)):
+async def analyze_github(url: str = Form(...), depth: str = Form("Quick Scan"), topics: str = Form(""), run_id: str = Form(None)):
     if run_id is None:
         run_id = uuid4().hex
-        runs[run_id] = {
+    
+    # Basic validation for GitHub URL
+    if not url.startswith("https://github.com/") and not url.startswith("http://github.com/"):
+         raise HTTPException(status_code=400, detail="Invalid URL. Please provide a valid GitHub repository link (e.g., https://github.com/user/repo).")
+    
+    # Always initialize the run structure
+    runs[run_id] = {
         "filename": "",
         "gitlink" : url,
         "depth": depth,
+        "topics": topics,
         "status": "queued",
         "knowledge" : {},
         "plan": [],
@@ -246,10 +272,10 @@ async def get_current_active_user(current_user: User = Depends(get_current_user)
     return current_user
 
 @app.get("/analyze")
-async def analyze(run_id: str = Query(...),current_user: User = Depends(get_current_user)):
+async def analyze(run_id: str = Query(...),current_user: User = Depends(get_current_user_optional)):
     if run_id not in runs:
         raise HTTPException(404, "Run ID not found")
-    if runs[run_id]["depth"] == "Deep Research" and not current_user:
+    if get_run_attr(runs[run_id], "depth") == "Deep Research" and not current_user:
         raise HTTPException(401, "Login required for deep research")
 
 @app.post("/register")
@@ -305,24 +331,140 @@ def register(Username : str = Query(...),Email:str = Query(...),Password:str = Q
 """
 
 @app.post("/run/{run_id}")
-def run_Graph(run_id: str,User = Depends(get_current_user)):
-    try:
-        state = InputState(
-            run_id=run_id,
-            is_authenticated=User,
-            install_preset="",
-            run_profile="",
-            run_args={}
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    final_state = graph.invoke(state)
-    runs[run_id] = final_state
-    return {"message": "Graph run completed successfully"}
+def run_Graph(run_id: str, User = Depends(get_current_user_optional)):
+    if run_id not in runs:
+        raise HTTPException(status_code=404, detail="Run ID not found")
+    
+    run_data = runs[run_id]
+    
+    
 
-@app.get("/run/{run_id}/overview")
-def get_overview(run_id: str):
-    pass    
+@app.post("/run/{run_id}/overview")
+def get_overview(run_id: str, instruction: str = Form(None), User = Depends(get_current_user_optional)):
+    if run_id not in runs:
+        raise HTTPException(status_code=404, detail="Run ID not found")
+    
+    try:
+        run_data = runs[run_id]
+        
+        if isinstance(run_data, dict):
+            git_url = run_data.get("gitlink", "")
+            current_topics = run_data.get("topics", "")
+        else:
+            git_url = run_data.git_link
+            current_topics = run_data.topics
+
+        code_files = []
+        dependencies = {}
+        dependencies_in_code_files = {}
+        targets = []
+
+        if instruction:
+            new_topics = ""
+            if current_topics:
+                new_topics = f"{current_topics}\nUser Instruction: {instruction}"
+            else:
+                new_topics = f"User Instruction: {instruction}"
+            
+            if isinstance(run_data, dict):
+                run_data["topics"] = new_topics
+            else:
+                run_data.topics = new_topics
+            
+            current_topics = new_topics
+
+        if git_url:
+            repo_name = git_url.rstrip("/").split("/")[-1].replace(".git", "")
+            if not repo_name:
+                    repo_name = "unknown_repo"
+            repo_path = os.path.join(REPOS_DIR, f"{run_id}_{repo_name}")
+            
+            if not os.path.exists(repo_path):
+                    try:
+                        subprocess.run(["git", "clone", git_url, repo_path], check=True)
+                    except Exception as e:
+                        print(f"Error cloning repo: {e}")
+
+            ingestor = ProjectIngestor()
+            ingestor.ingest_directory_recursive(repo_path)
+            code_files, dependencies , dependencies_in_code_files = ingestor.detect_dependencies()
+            
+            target_discovery = TargetDiscovery(ingestor)
+            targets = target_discovery.discover(dependencies)
+            
+            if current_topics and targets:
+                targets = target_discovery.select_target_based_on_topic(targets, current_topics)
+                
+            if not targets and current_topics:
+                print(f"DEBUG: No specific dependencies targeted, but topic '{current_topics}' exists. Adding Global Migration target.")
+                global_target = {
+                    "dependency": "Global Migration",
+                    "priority": "Critical",
+                    "current_version": "N/A",
+                    "suggestion": "User Requested Migration",
+                    "risk": "High"
+                }
+                targets.append(global_target)
+                dependencies_in_code_files["Global Migration"] = code_files
+        
+        frontend_data = []
+        for i in targets:
+            frontend_data.append({
+                "dependency": i.get("dependency"),  
+                "priority": i.get("priority"),
+                "current_version": i.get("current_version"),
+                "suggestion": i.get("suggestion"),
+                "risk": i.get("risk")
+            })
+
+        try:
+            initial_state = InputState(
+                run_id=run_id,
+                git_link=git_url,
+                is_authenticated=User is not None, 
+                topics=current_topics, 
+                install_preset="",
+                run_profile="",
+                run_args={},
+                code_files=code_files,
+                dependencies=dependencies,
+                dependencies_in_code_files=dependencies_in_code_files,
+                targets=targets
+            )
+            runs[run_id] = initial_state
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"State initialization failed: {str(e)}")
+        return frontend_data
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        print(f"CRITICAL ERROR in get_overview: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal Server Error: {str(e)}")
+
+@app.post("/run/{run_id}/generate_migration_plan")
+def generate_migration_plan(run_id: str):
+    try:
+        if run_id not in runs:
+            raise HTTPException(status_code=404, detail="Run ID not found")
+        run_data = runs[run_id]
+        
+        if isinstance(run_data, dict):
+             raise HTTPException(status_code=500, detail="Invalid run state: Data is dict, expected InputState")
+        
+        state = run_data
+        print(f"Invoking graph for run {run_id}")
+        result = graph.invoke(state)
+        runs[run_id] = result
+        return result
+    except Exception as e:
+        print(f"CRITICAL ERROR in generate_migration_plan: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Plan generation failed: {str(e)}")
+def get_run_attr(run_state, attr_name, default=None):
+    if isinstance(run_state, dict):
+        return run_state.get(attr_name, default)
+    return getattr(run_state, attr_name, default)
 
 @app.get("/run/{run_id}/knowledge")
 def get_knowledge(run_id: str):
@@ -338,25 +480,40 @@ def get_knowledge(run_id: str):
                 })
     knwoldege docs conme in this format 
     """
-    return runs[run_id].get("retrieved_docs", [])
+    return get_run_attr(runs[run_id], "retrieved_docs", [])
+
+
+
 
 @app.get("/run/{run_id}/plan")
-def get_plan(run_id: str ,current_user: User = Depends(get_current_user)):
+def get_plan(run_id: str ,current_user: User = Depends(get_current_user_optional)):
     if run_id not in runs:
         raise HTTPException(404, "Run ID not found")
-    if runs[run_id]["depth"] == "Deep Research" and not current_user:
+    
+    run_state = runs[run_id]
+    depth = get_run_attr(run_state, "depth")
+    
+    if depth == "Deep Research" and not current_user:
         raise HTTPException(401, "Login required for deep research")
     
-    return runs[run_id]["migration_rules"] , runs[run_id]["risks"]
+    return get_run_attr(run_state, "migration_rules"), get_run_attr(run_state, "risks")
 
 @app.get("/run/{run_id}/changes")
-def get_changes(run_id: str,current_user: User = Depends(get_current_user)):
+def get_changes(run_id: str,current_user: User = Depends(get_current_user_optional)):
     if run_id not in runs:
         raise HTTPException(404, "Run ID not found")
-    if runs[run_id]["depth"] == "Deep Research" and not current_user:
+    
+    run_state = runs[run_id]
+    if get_run_attr(run_state, "depth") == "Deep Research" and not current_user:
         raise HTTPException(401, "Login required for deep research")
-    gen_code = runs[run_id]["generated_code"]
-    ini_code = runs[run_id]["code"]
+        
+    gen_code = get_run_attr(run_state, "generated_code") or {}
+    ini_code = get_run_attr(run_state, "code") or {}
+    
+    # Fallback if names mismatch in InputState
+    if not ini_code:
+        pass
+
     changed_code = {}
     for u,v in ini_code.items():
         if not gen_code.get(u):
@@ -369,40 +526,49 @@ def get_changes(run_id: str,current_user: User = Depends(get_current_user)):
     return {"Initial_code": ini_code, "Generated_code": gen_code, "Changed_code": changed_code}
 
 @app.get("/run/{run_id}/verify")
-def get_verify(run_id: str,current_user: User = Depends(get_current_user)):
+def get_verify(run_id: str,current_user: User = Depends(get_current_user_optional)):
     if run_id not in runs:
         raise HTTPException(404, "Run ID not found")
-    if runs[run_id]["depth"] == "Deep Research" and not current_user:
+    
+    run_state = runs[run_id]
+    if get_run_attr(run_state, "depth") == "Deep Research" and not current_user:
         raise HTTPException(401, "Login required for deep research")
-
+    return get_run_attr(run_state, "verify")
 
 @app.get("/run/{run_id}/reflect")
-def get_reflect(run_id: str,current_user: User = Depends(get_current_user)):
+def get_reflect(run_id: str,current_user: User = Depends(get_current_user_optional)):
     if run_id not in runs:
         raise HTTPException(404, "Run ID not found")
-    if runs[run_id]["depth"] == "Deep Research" and not current_user:
-        raise HTTPException(401, "Login required for deep research")
+        
+    run_state = runs[run_id]
+    if get_run_attr(run_state, "depth") == "Deep Research" and not current_user:
+        raise HTTPException(401, "Login required for Reflection")
+    return get_run_attr(run_state, "errors")
 
 
 @app.get("/run/{run_id}/trace")
-def get_trace(run_id: str,current_user: User = Depends(get_current_user),req:ReflectionRequest = Depends()):
+def get_trace(run_id: str,current_user: User = Depends(get_current_user_optional),req:ReflectionRequest = Depends()):
     if run_id not in runs:
         raise HTTPException(404, "Run ID not found")
-    if runs[run_id]["depth"] == "Deep Research" and not current_user:
+        
+    run_state = runs[run_id]
+    if get_run_attr(run_state, "depth") == "Deep Research" and not current_user:
         raise HTTPException(401, "Login required for Trace")
+        
     if req.action == "Knowledge":
-        return runs[run_id]["retrieved_docs"]
+        return get_run_attr(run_state, "retrieved_docs", [])
     elif req.action == "RuleSynthesis":
-        return runs[run_id]["initial_rules"]
+        return get_run_attr(run_state, "initial_rules")
     elif req.action == "MigrationRules":
-        return runs[run_id]["migration_rules"]
+        return get_run_attr(run_state, "migration_rules")
     elif req.action == "PatchGeneration":
-        return runs[run_id]["generated_code"]
+        return get_run_attr(run_state, "generated_code")
     elif req.action == "Reflection":
-        if not runs[run_id]["errors"]:
+        errors = get_run_attr(run_state, "errors")
+        if not errors:
             return "Completed"
         else:
-            return runs[run_id]["errors"]
+            return errors
     ##this is used to trace the working of the langgraph
 
 

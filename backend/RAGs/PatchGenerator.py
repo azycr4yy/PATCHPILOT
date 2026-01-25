@@ -28,9 +28,9 @@ Risks and Caveats:
 - Risk 2: Changing the configuration style from an inner `Config` class to `model_config` might introduce subtle differences in behavior if there were any custom configurations or hooks in the original `Config` class.
 """
 from RAGs.api_import import HUGGING_FACE
-from huggingface_hub import InferenceClient
 from pathlib import Path
 import os
+from utils import retry_with_backoff
 
 CODING_GUIDE = """You are a code modification engine.
 
@@ -107,11 +107,14 @@ FORBIDDEN BEHAVIOR
 - Do NOT change formatting except where a change is applied.
 """
 
-class PatchGenerator:
-    def __init__(self, model_name: str = "Qwen/Qwen2.5-32B-Instruct"):
-        self.model_name = model_name
-        self.client = InferenceClient(model=self.model_name, token=HUGGING_FACE)
+from model_utils import get_llm_client, MODEL_NAME
 
+class PatchGenerator:
+    def __init__(self, model_name: str = MODEL_NAME):
+        self.model_name = model_name
+        self.client = get_llm_client(self.model_name)
+
+    @retry_with_backoff()
     def generate_code(self, migration_steps: str, code: str) -> str:
         USER_PROMPT = f"""Apply the following migration steps to the provided code.
 

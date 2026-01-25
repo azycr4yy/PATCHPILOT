@@ -11,7 +11,7 @@ uploads_dir = BASE_DIR / "uploads"
 
 ALLOWED_EXTENSIONS = {
     "python": {".py"},
-    "node": {".js", ".mjs", ".cjs"},
+    "node": {".js", ".mjs", ".cjs", ".ts", ".jsx", ".tsx"},
     "c": {".c", ".h"},
     "cpp": {".cpp", ".cc", ".cxx", ".hpp"},
     "java": {".java"},
@@ -34,20 +34,26 @@ class ProjectIngestor:
                     
     def process_file(self, file_path):
         filename = os.path.basename(file_path)
+        # print(f"DEBUG: Processing potential file: {filename}")
         for key, val in ALLOWED_EXTENSIONS.items():
             if "." + filename.split('.')[-1] in val:
+                print(f"DEBUG: Found code file ({key}): {filename}")
                 self.code_files.append({"file": file_path, "lang": key})
                 return
         
         if filename in AUX_FILES:
+            print(f"DEBUG: Found aux file: {filename}")
             self.text_docs.append(file_path)
 
     def ingest_directory_recursive(self, directory):
+        print(f"DEBUG: Ingesting directory: {directory}")
         try:
             for item in os.listdir(directory):
                 item_path = os.path.join(directory, item)
                 
                 if os.path.isdir(item_path):
+                    if item.startswith('.') or item == "node_modules" or item == "venv":
+                        continue
                     self.ingest_directory_recursive(item_path)
                     continue
 
@@ -118,12 +124,12 @@ class ProjectIngestor:
         project_deps = self.load_project_dependencies()
         count_dependencies = {}
         PATTERNS = {
-            "python": re.compile(r'^(?:import|from)\s+([a-zA-Z_][\w.]*)', re.IGNORECASE),
+            "python": re.compile(r'^\s*(?:import|from)\s+([a-zA-Z_][\w.]*)', re.IGNORECASE),
             "node": re.compile(r'(?:from\s+[\'"]([^\'"]+)[\'"])|(?:require\s*\(\s*[\'"]([^\'"]+)[\'"])', re.IGNORECASE),
-            "java": re.compile(r'^import\s+([a-zA-Z_][\w.]*);', re.IGNORECASE),
-            "go": re.compile(r'^import\s+[\'"]([^\'"]+)[\'"]', re.IGNORECASE),
-            "c": re.compile(r'^#include\s*[<"]([^>"]+)[>"]', re.IGNORECASE),
-            "cpp": re.compile(r'^#include\s*[<"]([^>"]+)[>"]', re.IGNORECASE),
+            "java": re.compile(r'^\s*import\s+([a-zA-Z_][\w.]*);', re.IGNORECASE),
+            "go": re.compile(r'^\s*import\s+[\'"]([^\'"]+)[\'"]', re.IGNORECASE),
+            "c": re.compile(r'^\s*#include\s*[<"]([^>"]+)[>"]', re.IGNORECASE),
+            "cpp": re.compile(r'^\s*#include\s*[<"]([^>"]+)[>"]', re.IGNORECASE),
         }
         for file in self.code_files:
             used = set()

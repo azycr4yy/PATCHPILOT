@@ -345,8 +345,8 @@ const DiscoveryView = ({ data, onGeneratePlan, isGeneratingPlan, toggleMigration
         <div className="mt-6 flex justify-end">
             <button
                 onClick={onGeneratePlan}
-                disabled={!data || data.length === 0 || isGeneratingPlan}
-                className={`px-6 py-2 font-medium rounded text-sm flex items-center gap-2 ${!data || data.length === 0 ? 'bg-gray-800 text-gray-600 cursor-not-allowed' :
+                disabled={!data || isGeneratingPlan}
+                className={`px-6 py-2 font-medium rounded text-sm flex items-center gap-2 ${!data ? 'bg-gray-800 text-gray-600 cursor-not-allowed' :
                     isGeneratingPlan ? 'bg-gray-200 text-gray-800 cursor-wait' : 'bg-white text-gray-900 hover:bg-gray-200'
                     }`}
             >
@@ -360,24 +360,57 @@ const DiscoveryView = ({ data, onGeneratePlan, isGeneratingPlan, toggleMigration
     </div>
 );
 
-const OverviewView = ({ onNavigate, discoveryData, planData, toggleMigration, onGeneratePlan, isGeneratingPlan }) => {
+const OverviewView = ({ onNavigate, discoveryData, planData, onGeneratePlan, isGeneratingPlan, runId, onUpdateData }) => {
     const [expandedRows, setExpandedRows] = useState({});
-    const [targetVersions, setTargetVersions] = useState({});
-
-
-
-    const TARGET_OPTIONS = {
-        "auth-sdk-legacy": ["v2.0.0", "v2.1.0-beta", "v1.9.9-LTS"],
-        "database-connector": ["v5.0.0", "v5.1.0"],
-        "ui-components": ["v4.0.0", "v4.2.0"]
-    };
+    const [chatMessage, setChatMessage] = useState("");
+    const [isSending, setIsSending] = useState(false);
+    const [sendStatus, setSendStatus] = useState(null); // 'success', 'error'
 
     const toggleExpand = (id) => {
         setExpandedRows(prev => ({ ...prev, [id]: !prev[id] }));
     };
 
-    const handleVersionChange = (id, version) => {
-        setTargetVersions(prev => ({ ...prev, [id]: version }));
+    const handleSendInstruction = async (e) => {
+        e.preventDefault();
+        console.log("Sending instruction...", { runId, chatMessage });
+        
+        if (!chatMessage.trim()) {
+            console.warn("Message empty");
+            return;
+        }
+        if (!runId) {
+            console.error("No runId available for OverviewView");
+            alert("Session Error: No active analysis run found. Please re-run analysis.");
+            return;
+        }
+
+        setIsSending(true);
+        setSendStatus(null);
+        try {
+            const updatedData = await api.sendOverviewInstruction(runId, chatMessage);
+            console.log("Received updated data:", updatedData);
+            
+            if (onUpdateData) {
+                 if (Array.isArray(updatedData)) {
+                    console.log("Updating discovery data with array of length:", updatedData.length);
+                    onUpdateData(updatedData);
+                 } else {
+                    console.warn("Updated data is not an array:", updatedData);
+                 }
+            } else {
+                console.warn("onUpdateData prop missing");
+            }
+            
+            setSendStatus('success');
+            setChatMessage("");
+            setTimeout(() => setSendStatus(null), 3000);
+        } catch (error) {
+            console.error("Failed to send instruction:", error);
+            setSendStatus('error');
+            alert("Failed to send instruction: " + (error.message || "Unknown error"));
+        } finally {
+            setIsSending(false);
+        }
     };
 
     return (
@@ -385,7 +418,7 @@ const OverviewView = ({ onNavigate, discoveryData, planData, toggleMigration, on
             <div className="flex items-center justify-between mb-8">
                 <div>
                     <h2 className="text-2xl font-bold text-white">Migration Overview</h2>
-                    <p className="text-sm text-gray-400 mt-1">Select libraries to upgrade and review dependencies.</p>
+                    <p className="text-sm text-gray-400 mt-1">Review discovered libraries and dependencies.</p>
                 </div>
                 <StatusBadge status={planData ? "Running" : "Pending"} />
             </div>
@@ -400,11 +433,10 @@ const OverviewView = ({ onNavigate, discoveryData, planData, toggleMigration, on
                  ))}
             </div>
 
-            <div className="flex-1 overflow-auto border border-gray-800 rounded-lg bg-gray-900/20">
+            <div className="flex-1 overflow-auto border border-gray-800 rounded-lg bg-gray-900/20 mb-6">
                 <table className="w-full text-left text-sm">
                     <thead className="bg-gray-900 border-b border-gray-800 text-gray-400 font-mono text-xs uppercase sticky top-0 z-10">
                         <tr>
-                            <th className="px-6 py-3 font-medium w-10">Select</th>
                             <th className="px-6 py-3 font-medium">Library</th>
                             <th className="px-6 py-3 font-medium">Current Version</th>
                             <th className="px-6 py-3 font-medium">Target Version</th>
@@ -413,58 +445,13 @@ const OverviewView = ({ onNavigate, discoveryData, planData, toggleMigration, on
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-800">
-                        {/* Sample Placeholder Row */}
-                        <tr className="bg-gray-900/20 border-b border-gray-800/50 border-dashed opacity-50 hover:opacity-100 transition-all select-none group">
-                            <td className="px-6 py-4">
-                                <input type="checkbox" className="rounded border-gray-700 bg-gray-800 text-purple-500 focus:ring-purple-500 cursor-pointer w-4 h-4 transition-all" />
-                            </td>
-                            <td className="px-6 py-4 font-medium text-gray-500 italic group-hover:text-gray-400">sample-library-placeholder</td>
-                            <td className="px-6 py-4 font-mono text-gray-600">v1.0.0</td>
-                            <td className="px-6 py-4">
-                                <input 
-                                    type="text" 
-                                    defaultValue="v2.0.0"
-                                    className="bg-gray-900/50 border border-gray-700 text-gray-400 text-xs rounded px-2 py-1.5 focus:border-purple-500 outline-none font-mono w-24 focus:bg-gray-900 focus:text-gray-200 transition-colors"
-                                />
-                            </td>
-                            <td className="px-6 py-4">
-                                <div className="flex items-center gap-1 text-xs text-gray-600">
-                                    <Layers size={12} /> 0 Files
-                                </div>
-                            </td>
-                            <td className="px-6 py-4 text-right">
-                                <span className="text-xs text-gray-600 border border-gray-700 px-2 py-0.5 rounded uppercase tracking-wider">Example</span>
-                            </td>
-                        </tr>
-
                         {discoveryData && discoveryData.length > 0 ? discoveryData.map(mig => (
                             <React.Fragment key={mig.id}>
-                                <tr className={`hover:bg-gray-800/30 transition-colors ${!mig.enabled ? 'opacity-60 bg-gray-900/10' : ''}`}>
-                                    <td className="px-6 py-4">
-                                        <input
-                                            type="checkbox"
-                                            checked={mig.enabled}
-                                            onChange={() => toggleMigration(mig.id)}
-                                            className="rounded border-gray-700 bg-gray-800 text-purple-500 focus:ring-purple-500 cursor-pointer w-4 h-4"
-                                        />
-                                    </td>
+                                <tr className={`hover:bg-gray-800/30 transition-colors`}>
                                     <td className="px-6 py-4 font-medium text-white">{mig.library}</td>
                                     <td className="px-6 py-4 font-mono text-gray-400">{mig.current}</td>
-                                    <td className="px-6 py-4">
-                                        <input
-                                            type="text"
-                                            list={`list-${mig.id}`}
-                                            className="bg-gray-950 border border-gray-700 text-gray-200 text-xs rounded px-2 py-1.5 focus:border-purple-500 outline-none font-mono w-full transition-colors hover:border-gray-600"
-                                            value={targetVersions[mig.id] || mig.target}
-                                            onChange={(e) => handleVersionChange(mig.id, e.target.value)}
-                                            onClick={(e) => e.stopPropagation()}
-                                            disabled={!mig.enabled}
-                                        />
-                                        <datalist id={`list-${mig.id}`}>
-                                            {TARGET_OPTIONS[mig.library]?.map(v => (
-                                                <option key={v} value={v} />
-                                            ))}
-                                        </datalist>
+                                    <td className="px-6 py-4 font-mono text-purple-400">
+                                        {mig.target} <span className="text-xs text-gray-600 px-1 ml-2 border border-gray-700 rounded">LATEST</span>
                                     </td>
                                     <td className="px-6 py-4">
                                          <button 
@@ -477,12 +464,12 @@ const OverviewView = ({ onNavigate, discoveryData, planData, toggleMigration, on
                                         </button>
                                     </td>
                                     <td className="px-6 py-4 text-right">
-                                        <StatusBadge status={mig.enabled ? 'Ready' : 'Skipped'} />
+                                        <StatusBadge status={'Detected'} />
                                     </td>
                                 </tr>
                                 {expandedRows[mig.id] && (
                                     <tr className="bg-black/20">
-                                        <td colSpan="6" className="px-6 py-4 shadow-inner">
+                                        <td colSpan="5" className="px-6 py-4 shadow-inner">
                                             <div className="ml-10 p-4 bg-gray-900/50 rounded border border-gray-800">
                                                 <h4 className="text-xs font-bold text-gray-500 uppercase mb-3 flex items-center gap-2">
                                                     <FileCode size={12} /> Dependent Files Analysis
@@ -506,22 +493,62 @@ const OverviewView = ({ onNavigate, discoveryData, planData, toggleMigration, on
                             </React.Fragment>
                         )) : (
                             <tr>
-                                <td colSpan="6" className="text-center py-12 text-gray-500 italic">No libraries detected. Please analyze a project first.</td>
+                                <td colSpan="5" className="text-center py-12 text-gray-500 italic">No libraries detected. Please analyze a project first.</td>
                             </tr>
                         )}
                     </tbody>
                 </table>
             </div>
 
-            <div className="mt-6 flex justify-end gap-3">
-                 <div className="flex-1 text-xs text-gray-500 flex items-center">
-                    <AlertCircle size={14} className="mr-2" />
-                    Checking {discoveryData?.filter(m => m.enabled).length || 0} libraries for upgrade plan.
-                 </div>
+            {/* Chatbot Interface */}
+            <div className="bg-gray-900/40 border border-gray-800 rounded-lg p-4 mt-auto">
+                <div className="flex items-center gap-2 mb-3">
+                    <div className="w-6 h-6 rounded-full bg-purple-500/20 flex items-center justify-center">
+                         <Activity size={12} className="text-purple-400" />
+                    </div>
+                    <h3 className="text-sm font-semibold text-white">Migration Assistant</h3>
+                    <span className="text-xs text-gray-500">- Guide the update process</span>
+                </div>
+                
+                <form onSubmit={handleSendInstruction} className="flex gap-3">
+                    <input
+                        type="text"
+                        value={chatMessage}
+                        onChange={(e) => setChatMessage(e.target.value)}
+                        placeholder="Describe what you want to update (e.g., 'Upgrade auth-sdk and fix breaking changes')..."
+                        className="flex-1 bg-gray-950 border border-gray-700 rounded-lg px-4 py-3 text-sm text-gray-200 focus:outline-none focus:border-purple-500 transition-colors"
+                        disabled={isSending}
+                    />
+                    <button
+                        type="submit"
+                        disabled={isSending || !chatMessage.trim()}
+                        className={`px-4 py-2 rounded-lg font-medium text-sm flex items-center gap-2 transition-all ${
+                            isSending || !chatMessage.trim() 
+                            ? 'bg-gray-800 text-gray-500 cursor-not-allowed' 
+                            : 'bg-purple-600 hover:bg-purple-500 text-white'
+                        }`}
+                    >
+                        {isSending ? <Loader2 size={16} className="animate-spin" /> : <ArrowRight size={16} />}
+                        Send
+                    </button>
+                </form>
+                {sendStatus === 'success' && (
+                     <div className="mt-2 text-xs text-green-400 flex items-center gap-1 animate-in fade-in">
+                         <CheckCircle2 size={12} /> Instruction received. The agent will consider this context.
+                     </div>
+                )}
+                {sendStatus === 'error' && (
+                     <div className="mt-2 text-xs text-red-400 flex items-center gap-1 animate-in fade-in">
+                         <AlertCircle size={12} /> Failed to send instruction.
+                     </div>
+                )}
+            </div>
+
+            <div className="mt-6 flex justify-end">
                 <button
                     onClick={onGeneratePlan}
-                    disabled={!discoveryData || discoveryData.length === 0 || isGeneratingPlan}
-                    className={`px-6 py-3 font-medium rounded-lg text-sm flex items-center gap-2 transition-all shadow-lg ${!discoveryData || discoveryData.length === 0 ? 'bg-gray-800 text-gray-600 cursor-not-allowed' :
+                    disabled={isGeneratingPlan}
+                    className={`px-6 py-3 font-medium rounded-lg text-sm flex items-center gap-2 transition-all shadow-lg ${
                         isGeneratingPlan ? 'bg-gray-200 text-gray-800 cursor-wait' : 'bg-white text-gray-900 hover:bg-gray-100 hover:scale-[1.02]'
                         }`}
                 >
@@ -777,55 +804,45 @@ const VerificationView = ({ verificationData, onRequestFix }) => (
     </div>
 );
 
-const ReflectionView = () => (
-    <div className="max-w-5xl mx-auto p-8 h-full flex flex-col">
-        <SectionHeader title="Reflection Loop" subtitle="Autonomous retry attempts triggered by verification failures." />
-
-        <div className="flex-1 relative">
-            <div className="absolute left-6 top-4 bottom-0 w-0.5 bg-gray-800" />
-
-            {INITIAL_REFLECTION.map((item, idx) => (
-                <div key={item.id} className="relative pl-20 pb-12">
-                    {/* Node */}
-                    <div className="absolute left-[15px] top-0 w-8 h-8 rounded-full bg-gray-950 border-4 border-gray-800 flex items-center justify-center z-10">
-                        <span className="text-gray-500 font-bold text-xs">{item.attempt}</span>
-                    </div>
-
-                    <div className="bg-gray-900 border border-gray-800 rounded-lg p-5">
-                        <div className="flex justify-between items-start mb-4">
-                            <div>
-                                <h3 className="text-sm font-semibold text-white">Attempt #{item.attempt}</h3>
-                                <div className="text-xs text-gray-500 font-mono mt-1">{item.target}</div>
-                            </div>
-                            <StatusBadge status={item.outcome === 'Resolved' ? 'resolved' : 'failed'} />
-                        </div>
-
-                        <div className="space-y-4">
-                            <div>
-                                <div className="text-[10px] uppercase text-gray-500 font-bold mb-1">Triggering Failure</div>
-                                <div className="bg-black/30 p-2 rounded border border-red-900/20 text-red-400 font-mono text-xs">
-                                    {item.trigger}
-                                </div>
-                            </div>
-                            <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                    <div className="text-[10px] uppercase text-gray-500 font-bold mb-1">Diagnosis</div>
-                                    <p className="text-sm text-gray-300">{item.diagnosis}</p>
-                                </div>
-                                <div>
-                                    <div className="text-[10px] uppercase text-gray-500 font-bold mb-1">Applied Fix</div>
-                                    <p className="text-sm text-blue-300">{item.fix}</p>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+const ReflectionView = ({ data }) => {
+    return (
+        <div className="max-w-6xl mx-auto p-8 h-full flex flex-col">
+            <div className="flex items-center justify-between mb-8">
+                <div>
+                     <h2 className="text-2xl font-bold text-white">Docker Verification Reflection</h2>
+                     <p className="text-sm text-gray-400 mt-1">Review build and runtime errors captured during verification.</p>
                 </div>
-            ))}
-        </div>
-    </div>
-);
+                 <StatusBadge status={data && Object.keys(data).length > 0 ? "Issues Found" : "Clean"} />
+            </div>
 
-const TraceView = ({ onSelect }) => (
+            <div className="flex-1 overflow-auto space-y-4">
+                {data && Object.keys(data).length > 0 ? (
+                    Object.entries(data).map(([file, error], idx) => (
+                        <div key={idx} className="bg-gray-900/40 border border-red-900/30 rounded-lg overflow-hidden">
+                             <div className="bg-red-900/10 px-4 py-3 border-b border-red-900/20 flex items-center gap-2">
+                                <AlertCircle size={16} className="text-red-400" />
+                                <span className="font-mono text-sm text-red-200">{file}</span>
+                             </div>
+                             <div className="p-4 bg-black/40">
+                                 <pre className="text-xs font-mono text-gray-300 overflow-x-auto whitespace-pre-wrap">
+                                    {typeof error === 'string' ? error : JSON.stringify(error, null, 2)}
+                                 </pre>
+                             </div>
+                        </div>
+                    ))
+                ) : (
+                    <div className="flex flex-col items-center justify-center h-64 border border-gray-800 border-dashed rounded-lg bg-gray-900/20 text-gray-500">
+                        <CheckCircle2 size={48} className="mb-4 text-green-500/20" />
+                        <p>No verification errors reported.</p>
+                        <p className="text-xs opacity-60 mt-2">Any Docker build or runtime failures will appear here.</p>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+};
+
+const TraceView = ({ onSelect, traceData }) => (
     <div className="max-w-3xl mx-auto p-8 h-full">
         <SectionHeader title="LangGraph Trace" subtitle="Agent orchestration and state transitions." />
 
@@ -833,9 +850,9 @@ const TraceView = ({ onSelect }) => (
             <div className="absolute left-[19px] top-4 bottom-0 w-0.5 bg-gray-800" />
 
             <div className="space-y-8">
-                {INITIAL_TRACE.map((node, i) => (
-                    <div key={node.id} className="relative pl-14 cursor-pointer group" onClick={() => onSelect(node, 'trace')}>
-                        <div className={`absolute left-0 top-1 w-10 h-10 rounded-full border-4 border-gray-950 flex items-center justify-center z-10 transition-colors ${i === INITIAL_TRACE.length - 1 ? 'bg-purple-500 text-white animate-pulse shadow-[0_0_15px_rgba(168,85,247,0.4)]' : 'bg-gray-800 text-gray-400 group-hover:bg-gray-700'
+                {traceData && traceData.length > 0 ? traceData.map((node, i) => (
+                    <div key={i} className="relative pl-14 cursor-pointer group" onClick={() => onSelect(node, 'trace')}>
+                         <div className={`absolute left-0 top-1 w-10 h-10 rounded-full border-4 border-gray-950 flex items-center justify-center z-10 transition-colors ${i === traceData.length - 1 ? 'bg-purple-500 text-white animate-pulse shadow-[0_0_15px_rgba(168,85,247,0.4)]' : 'bg-gray-800 text-gray-400 group-hover:bg-gray-700'
                             }`}>
                             <div className="text-[10px] font-bold">{i + 1}</div>
                         </div>
@@ -857,7 +874,9 @@ const TraceView = ({ onSelect }) => (
                             </div>
                         </div>
                     </div>
-                ))}
+                )) : (
+                    <div className="pl-14 text-gray-500 italic">No trace recording available. Run analysis to generate trace.</div>
+                )}
             </div>
         </div>
     </div>
@@ -1151,13 +1170,21 @@ const LoginView = ({ onLogin }) => {
 
 // --- Main App Shell ---
 
+// --- Main App Shell ---
+
 const App = () => {
     const [isLoggedIn, setIsLoggedIn] = useState(false);
     const [activeView, setActiveView] = useState('input');
     const [panelOpen, setPanelOpen] = useState(false);
     const [selectedItem, setSelectedItem] = useState(null);
     const [selectionType, setSelectionType] = useState(null);
-    const [currentRunId, setCurrentRunId] = useState(null);
+    const [currentRunId, setCurrentRunId] = useState(() => sessionStorage.getItem('patch_pilot_run_id'));
+
+    useEffect(() => {
+        if (currentRunId) {
+            sessionStorage.setItem('patch_pilot_run_id', currentRunId);
+        }
+    }, [currentRunId]);
 
     // --- Backend State ---
     const [projectInfo, setProjectInfo] = useState(null);
@@ -1165,9 +1192,10 @@ const App = () => {
     const [planData, setPlanData] = useState(null);
     const [knowledgeData, setKnowledgeData] = useState(null);
     const [changesData, setChangesData] = useState(null);
-    const [traceData, setTraceData] = useState(INITIAL_TRACE); // Fallback for now
 
-    const [verificationData, setVerificationData] = useState(INITIAL_VERIFICATION);
+    const [verificationData, setVerificationData] = useState(null);
+    const [reflectData, setReflectData] = useState(null);
+    const [traceData, setTraceData] = useState(null); // New state for trace
     const [loading, setLoading] = useState({
         analyzing: false,
         generatingPlan: false,
@@ -1178,11 +1206,21 @@ const App = () => {
         try {
             let runId = data.run_id;
 
-            // For now, handling both github and upload trigger via same local state update
-            // In real app, we would maybe poll for status if using run_id
-            if (data.url) {
-                const res = await api.analyzeGithub(data.url, data.depth || "Quick Scan");
+            // Map backend config field naming to API parameters
+            const url = data.github_url || data.url; 
+            const depth = data.analysis_depth || data.depth || "Quick Scan";
+
+            if (url) {
+                console.log("Starting analysis for:", url);
+                const res = await api.analyzeGithub(url, depth);
+                console.log("Analysis Result:", res);
                 runId = res.run_id;
+            } else if (!runId) {
+                // If no URL provided and no existing runId, we cannot proceed.
+                console.warn("Analysis skipped: No URL or Run ID provided.");
+                setLoading(prev => ({ ...prev, analyzing: false }));
+                alert("Please provide a valid GitHub URL to start analysis.");
+                return;
             }
             
             if (runId) setCurrentRunId(runId);
@@ -1192,44 +1230,68 @@ const App = () => {
                 await api.getAnalysisStatus(runId);
             }
 
-            // Mocking the completion of analysis for the UX
-            setTimeout(() => {
-                setProjectInfo({
-                    files: 154,
-                    languages: ["Python", "JavaScript"],
-                    dependencies: 28,
-                    status: "Analysis Complete"
-                });
-                setLoading(prev => ({ ...prev, analyzing: false }));
-                // Trigger discovery fetch
-                fetchDiscovery();
-                setActiveView('overview');
-            }, 2000);
+            // Real Analysis Flow:
+            // 1. analyzeGithub has already returned (meaning cloning is done or queued).
+            // 2. We now trigger discovery (ingestion) via get_overview.
+            setLoading(prev => ({ ...prev, analyzing: false }));
+            
+            // Trigger discovery fetch with REAL runId and wait for it
+            await fetchDiscovery(runId);
+            setActiveView('overview');
 
         } catch (error) {
             console.error("Analysis failed:", error);
+            const msg = error.message || "Unknown error";
             if (error.status === 401) {
                 // Redirect to login
                 setIsLoggedIn(false);
             } else {
-                alert("Analysis failed: " + error.message);
+                alert("Analysis failed: " + msg);
             }
             setLoading(prev => ({ ...prev, analyzing: false }));
         }
     };
 
-    const fetchDiscovery = async () => {
+    const fetchDiscovery = async (runId) => {
+        if (!runId) return;
         try {
-            const data = await api.getDiscovery();
+            const data = await api.getDiscovery(runId);
             setDiscoveryData(data);
-        } catch (e) { console.error(e); }
+            // Optional: update project info based on real data count?
+            if (data) {
+                 setProjectInfo(prev => ({...prev, dependencies: data.length, status: "Analysis Complete"}));
+            }
+        } catch (e) {
+            console.error("Discovery fetch failed:", e); 
+            // alert("Failed to fetch project overview."); 
+        }
     };
 
     const handleGeneratePlan = async () => {
         setLoading(prev => ({ ...prev, generatingPlan: true }));
         const selected = discoveryData.filter(m => m.enabled);
-        const plan = await api.generatePlan(selected);
-        setPlanData(plan);
+        try {
+            // Trigger generation on backend
+            await api.generatePlan(currentRunId, selected);
+            // Fetch the generated plan
+            const plan = await api.getPlan(currentRunId);
+             
+            // Adapt the tuple [rules, risks] to the UI format if needed
+            if (Array.isArray(plan) && typeof plan[0] === 'string') {
+                 setPlanData([{
+                     id: 'PLAN', target: 'General', step: 'Migration Rules', status: 'complete',
+                     details: plan[0], rules: []
+                 }, {
+                     id: 'RISKS', target: 'General', step: 'Risks', status: 'pending',
+                     details: plan[1], rules: []
+                 }]);
+            } else {
+                setPlanData(plan);
+            }
+        } catch(e) {
+            console.error("Plan generation failed", e);
+            alert("Plan generation failed: " + e.message);
+        }
         setLoading(prev => ({ ...prev, generatingPlan: false }));
         setActiveView('plan');
     };
@@ -1286,11 +1348,27 @@ const App = () => {
                     const data = await api.getChanges(currentRunId);
                     setChangesData(data);
                 } else if (activeView === 'trace') {
-                     // Fetch trace data (maybe list of steps?)
-                     // Backend trace endpoint returns specific action data based on query.
-                     // The TraceView expects a list of nodes.
-                     // We might punt on this or try to fetch something.
-                     // The user asked to connect it.
+                     try {
+                        const kData = await api.getKnowledge(currentRunId);
+                        const pData = await api.getPlan(currentRunId);
+                        const vData = await api.getVerify(currentRunId);
+                        
+                        const trace = [
+                            { agent: 'Input Agent', target: 'Project', input: 'GitHub URL', output: 'Source Code Ingested', status: 'completed' },
+                            { agent: 'Knowledge Agent', target: 'RAG', input: 'Dependencies', output: `${kData ? kData.length : 0} documents retrieved`, status: kData ? 'completed' : 'pending' },
+                            { agent: 'Plan Agent', target: 'Migration', input: 'Docs + Rules', output: pData ? 'Migration Plan Generated' : 'Pending', status: pData ? 'completed' : 'pending' },
+                            { agent: 'Verify Agent', target: 'Validation', input: 'Plan', output: vData ? `${vData.length} checks run` : 'Pending', status: vData ? 'completed' : 'pending' }
+                        ];
+                        setTraceData(trace);
+                     } catch(e) { console.error("Trace fetch failed", e); }
+                } else if (activeView === 'verify' && verificationData === INITIAL_VERIFICATION) {
+                     try {
+                        const data = await api.getVerify(currentRunId);
+                        if (data && data.length > 0) setVerificationData(data);
+                     } catch(e) { console.error("Verify fetch failed", e); }
+                } else if (activeView === 'reflect' && !reflectData) {
+                    const data = await api.getReflectData(currentRunId);
+                    setReflectData(data);
                 }
             } catch (err) {
                 console.error(`Failed to fetch data for ${activeView}`, err);
@@ -1383,21 +1461,21 @@ const App = () => {
                             onNavigate={setActiveView}
                             discoveryData={discoveryData}
                             planData={planData}
-                            toggleMigration={toggleMigration}
+                            // toggleMigration={toggleMigration} // No longer needed
                             onGeneratePlan={handleGeneratePlan}
                             isGeneratingPlan={loading.generatingPlan}
+                            runId={currentRunId}
+                            onUpdateData={setDiscoveryData}
                         />
                     )}
-                    {activeView === 'knowledge' && <KnowledgeView onSelect={handleViewDetails} data={knowledgeData || INITIAL_KNOWLEDGE} />}
+                    {activeView === 'knowledge' && <KnowledgeView onSelect={handleViewDetails} data={knowledgeData || []} />}
                     {activeView === 'plan' && <PlanView onSelect={handleViewDetails} plan={planData} />}
                     {activeView === 'diffs' && <DiffView onSelect={handleViewDetails} changesData={changesData} />}
-                    {activeView === 'verify' && <VerificationView verificationData={verificationData} onRequestFix={handleRequestFix} />}
-                    {activeView === 'reflect' && <ReflectionView />}
-                    {activeView === 'trace' && <TraceView onSelect={handleViewDetails} />}
+                    {activeView === 'verify' && <VerificationView verificationData={verificationData || []} onRequestFix={handleRequestFix} />}
+    {activeView === 'reflect' && <ReflectionView data={reflectData} />}
+    {activeView === 'trace' && <TraceView onSelect={handleViewDetails} traceData={traceData} />}
                 </main>
-            </div>
 
-            {/* Slide-over Panel */}
             <ContextPanel
                 isOpen={panelOpen}
                 item={selectedItem}
@@ -1405,6 +1483,7 @@ const App = () => {
                 onClose={() => setPanelOpen(false)}
             />
         </div>
+    </div>
     );
 };
 

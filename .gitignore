@@ -12,3 +12,4 @@ models.md
 /backend/zzztest.py
 /backend/__pycache__
 /backend/tests
+/backend/RAGs/virtual_testing

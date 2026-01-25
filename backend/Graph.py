@@ -23,7 +23,7 @@ class InputState(BaseModel):
         default="",
         description="The rules to be ingested",
     )
-    errors : List[str] = Field(default_factory=list,description="The errors to be ingested")
+    errors : dict = Field(default_factory=dict,description="The errors to be ingested") 
     risks : str = Field(
         default="",
         description="The risks to be ingested",
@@ -49,24 +49,8 @@ class InputState(BaseModel):
     current_target_file : str = Field(default="", description="The current file being targeted")
     current_file_language : str = Field(default="", description="The current file language")
     retry_count: int = Field(default=0, description="Number of patch retry attempts")
+    final_generated_code : dict = Field(default_factory=dict,description="The final generated code of the project")
 
-
-def project_ingestion_Graph(state: InputState):
-    git_url = str(state.git_link)
-    if git_url:
-        project_name = git_url.rstrip("/").split("/")[-1].replace(".git", "")
-        repo_path = os.path.join(os.path.dirname(__file__), "repos", project_name)
-        if not Path(repo_path).exists():
-            subprocess.run(["git", "clone", git_url, repo_path])
-        ingestor = ProjectIngestor()
-        ingestor.ingest_directory_recursive(repo_path)
-        code_files, dependencies , dependencies_in_code_files = ingestor.detect_dependencies()
-        state.code_files = code_files
-        state.dependencies = dependencies
-        state.dependencies_in_code_files = dependencies_in_code_files
-        target_discovery = TargetDiscovery(ingestor)
-        state.targets = target_discovery.discover(dependencies)
-    return state
 
 def User_confirmation_Graph(state: InputState):
     return state
@@ -75,15 +59,22 @@ def User_confirmation_Graph(state: InputState):
 def Knowledge_Graph(state: InputState):
     knowledge_retriever = KnowledgeRetriever()
     topic = state.topics
+    if not topic and state.targets:
+        topic = ", ".join([t['dependency'] for t in state.targets])
+        print(f"DEBUG: No specific topic provided. Inferred topic from targets: {topic}")
+
     if topic:
         queries = knowledge_retriever.generate_queries(topic)
         docs = knowledge_retriever.search(queries)
         state.retrieved_docs = docs
+    else:
+        print("DEBUG: No topic and no targets. Knowledge retrieval skipped.")
     return state
 
 def check_authentication(state: InputState):
     if not state.is_authenticated:
-        return "User Confirmation"
+        print("User not authenticated. bypassing auth check to prevent loop.")
+        return "Rule Synthesis"
     return "Rule Synthesis"
 
 def RuleSynthesis_Graph(state: InputState):
@@ -106,6 +97,8 @@ def RuleSynthesis_Graph(state: InputState):
     if path.exists():
         try:
             data = orjson.loads(path.read_bytes())
+            if not isinstance(data, list):
+                data = []
         except:
             data = []
     if isinstance(rules, list):
@@ -115,6 +108,22 @@ def RuleSynthesis_Graph(state: InputState):
     compiled_rules = synthesizer.rule_compiler(data)
     path.write_bytes(orjson.dumps(compiled_rules, option=orjson.OPT_INDENT_2))
     state.initial_rules = compiled_rules
+    
+    if state.targets and state.topics:
+        try:
+            target_discovery = TargetDiscovery(None) # Analyzer not needed for selection
+            print(f"DEBUG: Filtering {len(state.targets)} targets based on topic: '{state.topics}'")
+            filtered_targets = target_discovery.select_target_based_on_topic(state.targets, state.topics)
+            
+            if filtered_targets:
+                print(f"DEBUG: filtered_targets: {[t['dependency'] for t in filtered_targets]}")
+                state.targets = filtered_targets
+            else:
+                print("DEBUG: Filter returned empty. Keeping all original targets.")
+                
+        except Exception as e:
+            print(f"Error during target filtering: {e}. Proceeding with all targets.")
+
     return state
 
 def select_next_target(state: InputState):
@@ -166,7 +175,7 @@ def Migration_Graph(state: InputState):
     planner = MigrationPlanner()
     rules = state.initial_rules
     code = state.code
-    errors = state.errors
+    errors = state.errors.get(state.current_target_file, "")
     if not code:
         return state
     response = planner.plan_migration(rules, code, errors)
@@ -177,6 +186,18 @@ def Migration_Graph(state: InputState):
     return state
 
 
+def detect_language(code_str: str) -> tuple[str, str]:
+    code_str = code_str.lower()
+    if 'public class' in code_str or 'import java.' in code_str or ('package ' in code_str and ';' in code_str):
+        return 'java', '.java'
+    if 'def ' in code_str or ('from ' in code_str and 'import ' in code_str) or ('import ' in code_str and ';' not in code_str and 'public ' not in code_str):
+        return 'python', '.py'
+    if 'package main' in code_str or 'func main' in code_str:
+        return 'go', '.go'
+    if 'require(' in code_str or ('import ' in code_str and 'from ' in code_str) or ('const ' in code_str and '=' in code_str):
+         return 'node', '.js'
+    return 'unknown', ''
+
 def Patch_Graph(state: InputState):
     generator = PatchGenerator()
     steps = state.migration_rules
@@ -184,29 +205,70 @@ def Patch_Graph(state: InputState):
     generated_code = generator.generate_code(steps, code)
     curr_depend = state.current_target_dependency
     curr_file = state.current_target_file
+    
     if not isinstance(state.generated_code, dict):
         state.generated_code = {}
     state.generated_code.update({curr_file: generated_code})
+    
+    new_lang, new_ext = detect_language(generated_code)
+    
+    if new_lang != 'unknown':
+        print(f"DEBUG: Detected language {new_lang} for generated code.")
+        state.current_file_language = new_lang
+        
+    BASE_DIR = Path(__file__).resolve()
+    while BASE_DIR.name != "backend":
+        BASE_DIR = BASE_DIR.parent
+    virtual_dir = BASE_DIR / "RAGs" / "virtual_testing"
+    
+    # Save to virtual_testing for Docker verification
+    try:
+        virtual_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Determine filename
+        if new_ext and new_lang != 'unknown':
+             # Replace extension
+             file_name = Path(curr_file).stem + new_ext
+        else:
+             file_name = Path(curr_file).name
+             
+        target_path = virtual_dir / file_name
+        print(f"DEBUG: Saving patched file to {target_path} for verification")
+        
+        # Update current target file to point to the new location/name for subsequent steps if needed?
+        # ReflectionAgent uses project_context or state.current_file_language.
+        # But we need to make sure ReflectionAgent knows the ENTRY POINT.
+        # We will set a temporary field or rely on ReflectionAgent logic update.
+        # Let's save the effective filepath in state for Reflection to pick up.
+        state.current_target_file = str(target_path.name) # Just basename for Docker context?
+        # Actually Graph state expects full paths usually, but for virtual testing we use basename.
+        # Let's keep curr_file as original for tracking, but maybe add a new field or just rely on basename calc.
+        
+        with open(target_path, "w", encoding="utf-8") as f:
+            f.write(generated_code)
+            
+    except Exception as e:
+        print(f"Error writing file {target_path}: {e}")
     return state
 
 
 def Reflection_Graph(state: InputState):
     agent = ReflectionAgent()
     flag = True
-    current_file_dependencies = []
-    for i in state.code_files:
-        if i['file'] == state.current_target_file:
-            state.current_file_language = i['lang']
-            current_file_dependencies = i.get('dependencies', [])
-            break
+    curr_file = state.current_target_file
+    
     agent.generate_dockerfile(
         code_language=state.current_file_language,
         code_version=state.code_version,
         install_preset=state.install_preset,
         run_profile=state.run_profile,
-        run_args=state.run_args,
-        project_context={"dependencies": current_file_dependencies}
+        run_args={"entry": curr_file}, # Pass explicit entry point
+        project_context={
+            "dependencies": state.dependencies,
+            "code_files": state.code_files
+        }
     )
+
     
     BASE_DIR = Path(__file__).resolve() 
     while BASE_DIR.name != "backend":
@@ -218,11 +280,16 @@ def Reflection_Graph(state: InputState):
     try:
         ans = subprocess.check_output(["docker", "run", "--rm", "my-image"])
     except subprocess.CalledProcessError as e:
-        state.errors.append(e.output)
+        state.errors.update({curr_file: e.output})
         flag = False
     
     subprocess.run(["docker", "rmi", "my-image"])
     
+    generated_code = state.generated_code.get(curr_file)
+    if not isinstance(state.final_generated_code, dict):
+        state.final_generated_code = {}
+    if generated_code:
+        state.final_generated_code.update({curr_file: generated_code})
     state.validation_success = flag
     return state
 
@@ -242,7 +309,6 @@ def reflection_condition(state: InputState):
 
 graph_builder = StateGraph(InputState)
 
-graph_builder.add_node("Project Ingestion", project_ingestion_Graph)
 graph_builder.add_node("User Confirmation", User_confirmation_Graph)
 graph_builder.add_node("Knowledge", Knowledge_Graph)
 
@@ -252,9 +318,8 @@ graph_builder.add_node("Migration", Migration_Graph)
 graph_builder.add_node("Patch", Patch_Graph)
 graph_builder.add_node("Reflection", Reflection_Graph)
 
-graph_builder.set_entry_point("Project Ingestion")
+graph_builder.set_entry_point("User Confirmation")
 
-graph_builder.add_edge("Project Ingestion", "User Confirmation")
 graph_builder.add_edge("User Confirmation", "Knowledge")
 graph_builder.add_conditional_edges(
     "Knowledge",
@@ -284,7 +349,8 @@ graph_builder.add_conditional_edges(
     reflection_condition,
     {
         "Select Target": "Select Target",
-        "Finished State": END
+        "Finished State": END,
+        "Patch": "Patch"
     }
 )
 

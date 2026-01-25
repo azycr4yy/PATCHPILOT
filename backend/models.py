@@ -1,3 +1,4 @@
+
 from pydantic import BaseModel
 from typing import List, Optional, Union
 from enum import Enum
@@ -25,10 +26,10 @@ class AnalysisResponse(BaseModel):
     message: str
 
 class User(BaseModel):
-    email: str or None = None
-    password: str | None = None
+    email: Optional[str] = None
+    password: Optional[str] = None
     username : str
-    disabled : bool or None = None
+    disabled : Optional[bool] = None
     
 class UserinDB(User):
     hashed_password: str
@@ -42,3 +43,15 @@ class TokenData(BaseModel):
 
 class ReflectionRequest(BaseModel):
     action : str
+
+# New models for Migration/Plan
+class SelectedMigration(BaseModel):
+    id: str
+    library: str
+    current: str
+    target: str
+    confidence: float
+    enabled: bool
+
+class PlanRequest(BaseModel):
+    targets: List[SelectedMigration]
