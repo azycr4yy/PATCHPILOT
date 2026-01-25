@@ -19,15 +19,15 @@ _Migrate codebases across breaking changes with confidence, not hallucinations._
 
 ---
 
-## 📖 Overview
+## Overview
 
 PatchPilot is an intelligent agentic system designed to automate the painful process of migrating codebases across breaking library or framework changes (e.g., Pydantic v1 → v2, FastAPI upgrades).
 
 Unlike typical "code-rewrite" tools that blindly apply changes, PatchPilot treats migration as a systems engineering problem. It employs a **Retrieve → Plan → Patch → Verify → Reflect** loop to ensure transformations are accurate, safe, and functional.
 
-## ✨ Key Features
+##  Key Features
 
-### 🧠 UI IS AI
+### UI IS AI
 
 The user interface of PatchPilot is not just a dashboard; it is a **transparent window into the AI's reasoning**. We believe that for AI to be useful in engineering, it must be auditable.
 
@@ -42,12 +42,12 @@ Code generation is nothing without verification.
 - **Iterative Correction**: If a patch fails validation (syntax error, broken import, test failure), the **Reflection Agent** analyzes the error, retrieves new knowledge, and attempts a fix automatically.
 - **Dependency Graph Awareness**: Understands how changes in one file propagate to others.
 
-### 📚 RAG-Powered Accuracy
+###  RAG-Powered Accuracy
 
 - **Authoritative Sources**: Ingests official migration guides, release notes, and GitHub issues to ground its knowledge.
 - **Context-Aware**: Matches rules specifically to your codebase patterns.
 
-## 🏗️ System Architecture
+##  System Architecture
 
 PatchPilot is built on a modern, robust stack:
 
@@ -55,7 +55,7 @@ PatchPilot is built on a modern, robust stack:
 - **Frontend**: **React** with **Vite**, styled with **Tailwind CSS** for a premium, dark-mode "developer-native" aesthetic.
 - **AI/LLM**: Utilizes advanced RAG (Retrieval-Augmented Generation) pipelines to power the **Change Retrieval**, **Planning**, **Patching**, and **Reflection** agents.
 
-## 🚀 Workflow
+##  Workflow
 
 1.  **Ingest**: Upload your project source code (Zip/Tar) or point to a GitHub repository.
 2.  **Discover**: The system detects libraries, versions, and available migration targets.
@@ -66,5 +66,5 @@ PatchPilot is built on a modern, robust stack:
 ---
 
 <div align="center">
-  <sub>Built with ❤️ by the PatchPilot Team</sub>
+  <sub>Built with ❤️ by the azycrayy </sub>
 </div>
